@@ -1,0 +1,13 @@
+{
+  "name": "@gestorfrete/config",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "tsconfig.base.json",
+    "eslint-preset.js",
+    "tailwind.preset.ts"
+  ],
+  "devDependencies": {
+    "tailwindcss": "3.4.13"
+  }
+}

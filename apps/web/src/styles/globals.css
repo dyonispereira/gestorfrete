@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens — Sprint 12 Lote 1 (Design System).
+ *
+ * Palette: deep navy (`--primary`) + amber (`--accent`), chosen deliberately
+ * to read as a professional logistics/operations ERP rather than a generic
+ * SaaS product (avoids the default purple-gradient/all-light look). The
+ * sidebar keeps its own always-dark token set (`--sidebar-*`) regardless of
+ * light/dark mode — a persistently dark navigation rail against a light (or
+ * dark) content area is the visual anchor of the "premium ERP" identity the
+ * product asked for, not something that should flip with the theme toggle.
+ *
+ * `--tenant-brand` is set at runtime (inline style on <html>, see
+ * `core/tenant/branding.ts`) once a tenant has real branding data; it falls
+ * back to `--primary` here because the Backend has no branding endpoint yet.
+ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 222 47% 21%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 21%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 71% 33%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 21%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar stays dark navy in both themes on purpose (see file header). */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 30% 92%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-accent: 222 40% 18%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 222 40% 18%;
+  }
+
+  :root[data-theme="dark"],
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 44% 11%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 44% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 222 40% 16%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 222 40% 16%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 63% 45%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 63% 42%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+
+    --border: 222 40% 20%;
+    --input: 222 40% 20%;
+    --ring: 217 91% 60%;
+
+    --sidebar-background: 222 55% 6%;
+    --sidebar-foreground: 210 30% 92%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-accent: 222 44% 14%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 222 44% 14%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans text-base;
+  }
+}

@@ -1,0 +1,229 @@
+import type { LucideIcon } from "lucide-react";
+import {
+  Banknote,
+  Bot,
+  Building2,
+  ClipboardList,
+  FileStack,
+  Gauge,
+  LayoutDashboard,
+  LineChart,
+  ShieldCheck,
+  Truck,
+  Users,
+  Wrench,
+} from "lucide-react";
+
+export interface NavItem {
+  id: string;
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  /** RBAC codes gating this item — OR semantics (any one held is enough). */
+  requiredPermissions: string[];
+  /** `true` once a real page exists at `href`; otherwise routes to the module placeholder. */
+  implemented?: boolean;
+  description: string;
+}
+
+export interface NavGroup {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+/**
+ * The full universe of possible navigation entries, mirroring
+ * `RBAC_MATRIX.md` §7.1–§7.29's real module/resource taxonomy — not invented
+ * here. This list is static (there are only so many bounded contexts), but
+ * what actually renders in the Sidebar is computed at runtime from the
+ * User's resolved permissions (`PermissionsProvider`) — see
+ * `useAuthorizedNav`. Sprint 12's own lote order (Cadastros → Frota →
+ * Operação → Manutenção → Financeiro → Fiscal → Tracking → BI/IA) is what
+ * `implemented` will flip on, module by module, as each lote lands; until
+ * then the item is real and permission-gated, it just opens the shared
+ * "módulo ainda não implementado" placeholder instead of a business screen.
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    id: "overview",
+    label: "Visão Geral",
+    items: [
+      {
+        id: "dashboard",
+        label: "Painel",
+        href: "/dashboard",
+        icon: LayoutDashboard,
+        requiredPermissions: [],
+        implemented: true,
+        description: "Resumo operacional do tenant.",
+      },
+    ],
+  },
+  {
+    id: "cadastros",
+    label: "Cadastros",
+    items: [
+      {
+        id: "clients",
+        label: "Clientes",
+        href: "/m/clients",
+        icon: Users,
+        requiredPermissions: ["crm.client.view"],
+        description: "Clientes da transportadora.",
+      },
+      {
+        id: "suppliers",
+        label: "Fornecedores",
+        href: "/m/suppliers",
+        icon: Building2,
+        requiredPermissions: ["maintenance.supplier.view"],
+        description: "Fornecedores cadastrados.",
+      },
+      {
+        id: "drivers",
+        label: "Motoristas",
+        href: "/m/drivers",
+        icon: Users,
+        requiredPermissions: ["drivers.driver.view"],
+        description: "Motoristas da frota.",
+      },
+    ],
+  },
+  {
+    id: "fleet",
+    label: "Frota",
+    items: [
+      {
+        id: "vehicles",
+        label: "Veículos",
+        href: "/m/vehicles",
+        icon: Truck,
+        requiredPermissions: ["fleet.vehicle.view"],
+        description: "Veículos tracionadores e implementos.",
+      },
+    ],
+  },
+  {
+    id: "operacao",
+    label: "Operação",
+    items: [
+      {
+        id: "trips",
+        label: "Viagens",
+        href: "/m/trips",
+        icon: ClipboardList,
+        requiredPermissions: ["freight.trip.view"],
+        description: "Viagens e entregas.",
+      },
+    ],
+  },
+  {
+    id: "maintenance",
+    label: "Manutenção",
+    items: [
+      {
+        id: "work-orders",
+        label: "Ordens de Serviço",
+        href: "/m/work-orders",
+        icon: Wrench,
+        requiredPermissions: ["maintenance.work_order.view"],
+        description: "Ordens de serviço de manutenção.",
+      },
+    ],
+  },
+  {
+    id: "financial",
+    label: "Financeiro",
+    items: [
+      {
+        id: "invoices",
+        label: "Faturas",
+        href: "/m/invoices",
+        icon: Banknote,
+        requiredPermissions: ["financial.invoice.view"],
+        description: "Faturas e contas do tenant.",
+      },
+    ],
+  },
+  {
+    id: "fiscal",
+    label: "Fiscal",
+    items: [
+      {
+        id: "ctes",
+        label: "CT-e / MDF-e",
+        href: "/m/fiscal",
+        icon: FileStack,
+        requiredPermissions: ["documents.cte.view"],
+        description: "Documentos fiscais eletrônicos.",
+      },
+    ],
+  },
+  {
+    id: "tracking",
+    label: "Rastreamento",
+    items: [
+      {
+        id: "positions",
+        label: "Posições",
+        href: "/m/tracking",
+        icon: Gauge,
+        requiredPermissions: ["tracking.position.view"],
+        description: "Posição em tempo real da frota.",
+      },
+    ],
+  },
+  {
+    id: "insights",
+    label: "BI & IA",
+    items: [
+      {
+        id: "dashboards",
+        label: "Dashboards",
+        href: "/m/dashboards",
+        icon: LineChart,
+        requiredPermissions: ["reporting.dashboard.view_own", "reporting.dashboard.view_shared"],
+        description: "Dashboards e indicadores.",
+      },
+      {
+        id: "ai-suggestions",
+        label: "Sugestões de IA",
+        href: "/m/ai-suggestions",
+        icon: Bot,
+        requiredPermissions: ["ai.suggestion.view"],
+        description: "IA sugere; nunca decide (D161).",
+      },
+    ],
+  },
+  {
+    id: "admin",
+    label: "Administração",
+    items: [
+      {
+        id: "users",
+        label: "Usuários",
+        href: "/m/users",
+        icon: Users,
+        requiredPermissions: ["identity_access.user.view"],
+        description: "Usuários do tenant.",
+      },
+      {
+        id: "roles",
+        label: "Papéis e Permissões",
+        href: "/m/roles",
+        icon: ShieldCheck,
+        requiredPermissions: ["identity_access.role.view"],
+        description: "RBAC — papéis e permissões.",
+      },
+      {
+        id: "branches",
+        label: "Filiais",
+        href: "/m/branches",
+        icon: Building2,
+        requiredPermissions: ["tenancy.branch.view"],
+        description: "Filiais do tenant.",
+      },
+    ],
+  },
+];

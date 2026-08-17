@@ -1,0 +1,1 @@
+"""Infraestrutura transversal da aplicação (cross-cutting concerns): configuração, segurança, multi-tenancy, banco de dados, cache, mensageria, storage, observabilidade e tratamento de exceções. Nenhum código aqui conhece regras de negócio de nenhum bounded context."""

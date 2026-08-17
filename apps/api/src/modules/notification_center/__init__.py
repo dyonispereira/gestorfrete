@@ -1,0 +1,1 @@
+"""Bounded context: Notification Center. Central de notificações voltada ao usuário final dentro do produto (inbox, preferências de canal) — distinto de notifications, que é o barramento de eventos assíncronos entre bounded contexts."""

@@ -1,0 +1,1 @@
+"""Fundação de segurança da aplicação: contratos (interfaces) para hashing de senha, emissão/validação de JWT e verificação de permissões (RBAC). Nesta etapa apenas os contratos existem, sem implementação de login."""

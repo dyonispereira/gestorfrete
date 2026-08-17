@@ -1,0 +1,10 @@
+{
+  "extends": "@gestorfrete/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["dom", "esnext"],
+    "jsx": "react-jsx",
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

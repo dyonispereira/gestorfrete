@@ -1,0 +1,1 @@
+"""Camada de Infrastructure do módulo integration. Implementa os contratos definidos no domain e na application: persistência (SQLAlchemy), mensageria (RabbitMQ) e integrações externas. É a única camada que conhece detalhes técnicos concretos."""

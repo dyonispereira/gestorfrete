@@ -1,0 +1,1 @@
+"""Camada de Domain do módulo tenancy. Contém as regras de negócio puras: entidades, value objects, eventos de domínio e as interfaces (ports) de repositório. Não depende de nenhuma outra camada (regra de dependência da Clean Architecture)."""

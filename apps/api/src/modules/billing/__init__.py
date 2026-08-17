@@ -1,0 +1,1 @@
+"""Bounded context: Billing. Cobrança e faturamento da assinatura da transportadora na própria plataforma GestorFrete (SaaS billing) — distinto de financial, que trata do financeiro operacional da transportadora (fretes, motoristas)."""

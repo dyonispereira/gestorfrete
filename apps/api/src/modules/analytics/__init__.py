@@ -1,0 +1,1 @@
+"""Bounded context: Analytics. BI e métricas agregadas entre bounded contexts — dashboards analíticos para gestão da transportadora. Consome dados de outros módulos via eventos/projeções, nunca lê o banco interno de outro módulo diretamente."""

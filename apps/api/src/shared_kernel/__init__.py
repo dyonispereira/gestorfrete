@@ -1,0 +1,1 @@
+"""Shared Kernel: building blocks reaproveitados por todos os bounded contexts (base classes de domínio, contratos de application e infrastructure). Código aqui é genérico e não modela nenhum conceito de negócio específico."""

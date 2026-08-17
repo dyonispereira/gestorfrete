@@ -1,0 +1,1 @@
+"""Bounded context: CRM. Gestão do relacionamento comercial da transportadora com seus clientes/embarcadores: leads, contatos e oportunidades — distinto de freight, que trata da execução do frete em si."""

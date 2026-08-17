@@ -1,0 +1,1 @@
+"""Camada de Application do módulo onboarding. Orquestra o domínio para realizar casos de uso, organizados em Commands (escrita) e Queries (leitura) — CQRS. Depende apenas do domain, nunca de infrastructure ou interfaces."""

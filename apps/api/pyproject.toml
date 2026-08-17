@@ -1,0 +1,313 @@
+[tool.poetry]
+name = "gestorfrete-api"
+version = "0.1.0"
+description = "GestorFrete ERP Enterprise — API (FastAPI, DDD, Clean Architecture, CQRS, Event-Driven, Multi-Tenant)"
+authors = ["GestorFrete"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.32.0" }
+pydantic = "^2.9.0"
+pydantic-settings = "^2.5.0"
+email-validator = "^2.2.0"
+# Required at import time by `pydantic.EmailStr` (interfaces/schemas/auth_schemas.py's
+# `LoginRequest.email`) — pydantic does not vendor it; omitting this dependency crashes app
+# startup with `ImportError: email-validator is not installed`, only surfaced once something
+# actually imports the schema module (found running the Sprint 11 Lote 2 integration suite for
+# real, not by `ruff`/`mypy`, which don't execute pydantic's runtime schema generation).
+sqlalchemy = { extras = ["asyncio"], version = "^2.0.35" }
+asyncpg = "^0.29.0"
+alembic = "^1.13.2"
+redis = "^5.0.8"
+aio-pika = "^9.4.3"
+minio = "^7.2.9"
+httpx = "^0.27.2"
+python-jose = { extras = ["cryptography"], version = "^3.3.0" }
+passlib = { extras = ["bcrypt"], version = "^1.7.4" }
+# Pinned below 4.1: passlib 1.7.4 (last released 2020, unmaintained since)
+# probes `bcrypt.__about__.__version__`, removed in bcrypt 4.1 — with a
+# newer bcrypt, passlib's own internal self-test then crashes with
+# "password cannot be longer than 72 bytes" on *every* hash/verify call,
+# not just long passwords. Found by the Sprint 11 Lote 1 test suite
+# (tests/unit/test_security.py) — see docs/backend/TESTING_STRATEGY.md.
+bcrypt = "^4.0.1"
+python-multipart = "^0.0.9"
+# D404 — primeira dependência geoespacial do backend: mapeia GEOGRAPHY(Point/Polygon, 4326)
+# (`posicoes_veiculo.localizacao`, `cercas_eletronicas.centro`/`.poligono`) para SQLAlchemy 2.0
+# sem exigir `shapely` — leitura/escrita sempre via ST_X/ST_Y/ST_MakePoint/ST_SetSRID explícitos.
+geoalchemy2 = "^0.15.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.6.9"
+mypy = "^1.11.2"
+import-linter = "^2.13"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: requires live infra (postgres/redis/rabbitmq/minio) — run explicitly with `pytest -m integration`",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.mypy]
+mypy_path = "src"
+python_version = "3.12"
+strict = true
+
+[tool.importlinter]
+root_packages = ["core", "shared_kernel", "interfaces", "modules", "shared"]
+
+# D-alinhado a docs/backend/DEPENDENCY_RULES.md — enforced mechanically by
+# `lint-imports`, not just documented in prose (Sprint 11 Lote 1 explicit
+# requirement: "não considerar concluído apenas porque o código parece
+# certo"). Two contracts today (only `core`/`shared_kernel` have real code);
+# per-module Domain/Application/Infrastructure/Interfaces layering is added
+# module by module starting Sprint 11 Lote 2, once each has real code to
+# check — an empty-stub contract would pass vacuously and prove nothing.
+
+[[tool.importlinter.contracts]]
+name = "Shared Kernel has zero dependents among its own dependencies"
+type = "independence"
+modules = ["shared_kernel"]
+
+[[tool.importlinter.contracts]]
+name = "Shared Kernel never imports core, modules or interfaces"
+type = "forbidden"
+source_modules = ["shared_kernel"]
+forbidden_modules = ["core", "modules", "interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "Core (cross-cutting infrastructure) never imports modules or interfaces"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["modules", "interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "Composition root: interfaces depends on core, core never depends on interfaces"
+type = "layers"
+layers = ["interfaces", "core"]
+
+# Ativos desde que `tenancy`/`identity_access` ganharam código real (Sprint 11, Lote 2).
+# Carve-out deliberado: domain PODE importar core.exceptions/core.security.ports (vocabulário
+# puro, sem framework) — não listados aqui porque `forbidden_modules` bloqueia o pacote inteiro
+# `core`; ver docs/backend/DEPENDENCY_RULES.md para o raciocínio completo.
+
+[[tool.importlinter.contracts]]
+name = "tenancy/identity_access domain never imports infra-with-side-effects"
+type = "forbidden"
+source_modules = ["modules.tenancy.domain", "modules.identity_access.domain"]
+forbidden_modules = [
+    "core.database",
+    "core.messaging",
+    "core.cache",
+    "core.storage",
+    "core.observability",
+    "modules.tenancy.infrastructure",
+    "modules.tenancy.interfaces",
+    "modules.identity_access.infrastructure",
+    "modules.identity_access.interfaces",
+]
+
+[[tool.importlinter.contracts]]
+name = "tenancy/identity_access application never imports interfaces"
+type = "forbidden"
+source_modules = ["modules.tenancy.application", "modules.identity_access.application"]
+forbidden_modules = ["modules.tenancy.interfaces", "modules.identity_access.interfaces"]
+
+# Ativos desde que `shared/addresses` e os bounded contexts de Cadastros ganharam código real
+# (Sprint 11, Lote 3, D354). `shared` segue o mesmo contrato de `core` (nunca importa
+# modules/interfaces) — ver docs/backend/cadastros/README.md.
+
+[[tool.importlinter.contracts]]
+name = "shared never imports modules or interfaces"
+type = "forbidden"
+source_modules = ["shared"]
+forbidden_modules = ["modules", "interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "crm/maintenance/drivers/financial/fleet/freight/documents/tracking/mobile/storage/notification_center/integration/analytics/reporting/ai/shared.addresses domain never imports infra-with-side-effects"
+type = "forbidden"
+source_modules = [
+    "modules.crm.domain",
+    "modules.maintenance.domain",
+    "modules.drivers.domain",
+    "modules.financial.domain",
+    "modules.fleet.domain",
+    "modules.freight.domain",
+    "modules.documents.domain",
+    "modules.tracking.domain",
+    "modules.mobile.domain",
+    "modules.storage.domain",
+    "modules.notification_center.domain",
+    "modules.integration.domain",
+    "modules.analytics.domain",
+    "modules.reporting.domain",
+    "modules.ai.domain",
+    "shared.addresses.domain",
+    "shared.collaboration.domain",
+]
+forbidden_modules = [
+    "core.database",
+    "core.messaging",
+    "core.cache",
+    "core.storage",
+    "core.observability",
+    "modules.crm.infrastructure",
+    "modules.crm.interfaces",
+    "modules.maintenance.infrastructure",
+    "modules.maintenance.interfaces",
+    "modules.drivers.infrastructure",
+    "modules.drivers.interfaces",
+    "modules.financial.infrastructure",
+    "modules.financial.interfaces",
+    "modules.fleet.infrastructure",
+    "modules.fleet.interfaces",
+    "modules.freight.infrastructure",
+    "modules.freight.interfaces",
+    "modules.documents.infrastructure",
+    "modules.documents.interfaces",
+    "modules.tracking.infrastructure",
+    "modules.tracking.interfaces",
+    "modules.mobile.infrastructure",
+    "modules.mobile.interfaces",
+    "modules.storage.infrastructure",
+    "modules.storage.interfaces",
+    "modules.notification_center.infrastructure",
+    "modules.notification_center.interfaces",
+    "modules.integration.infrastructure",
+    "modules.integration.interfaces",
+    "modules.analytics.infrastructure",
+    "modules.analytics.interfaces",
+    "modules.reporting.infrastructure",
+    "modules.reporting.interfaces",
+    "modules.ai.infrastructure",
+    "modules.ai.interfaces",
+    "shared.addresses.infrastructure",
+    "shared.addresses.interfaces",
+    "shared.collaboration.infrastructure",
+]
+
+# `modules.mobile` é deliberadamente omitido do lado direito (`forbidden_modules`) das listas de
+# `interfaces` de outros módulos abaixo — ao contrário de todo módulo anterior, `mobile.application`
+# importa `freight.application.commands.*` de propósito (D303/D410: mesma Application Service, dois
+# canais). O que nunca pode é `mobile.application` importar `freight.interfaces` (contrato abaixo,
+# igual a todo módulo) nem qualquer módulo importar `mobile.interfaces`.
+
+[[tool.importlinter.contracts]]
+name = "crm/maintenance/drivers/financial/fleet/freight/documents/tracking/mobile/storage/notification_center/integration/analytics/reporting/ai/shared.addresses application never imports interfaces"
+type = "forbidden"
+source_modules = [
+    "modules.crm.application",
+    "modules.maintenance.application",
+    "modules.drivers.application",
+    "modules.financial.application",
+    "modules.fleet.application",
+    "modules.freight.application",
+    "modules.documents.application",
+    "modules.tracking.application",
+    "modules.mobile.application",
+    "modules.storage.application",
+    "modules.notification_center.application",
+    "modules.integration.application",
+    "modules.analytics.application",
+    "modules.reporting.application",
+    "modules.ai.application",
+    "shared.addresses.application",
+]
+forbidden_modules = [
+    "modules.crm.interfaces",
+    "modules.maintenance.interfaces",
+    "modules.drivers.interfaces",
+    "modules.financial.interfaces",
+    "modules.fleet.interfaces",
+    "modules.freight.interfaces",
+    "modules.documents.interfaces",
+    "modules.tracking.interfaces",
+    "modules.mobile.interfaces",
+    "modules.storage.interfaces",
+    "modules.notification_center.interfaces",
+    "modules.integration.interfaces",
+    "modules.analytics.interfaces",
+    "modules.reporting.interfaces",
+    "modules.ai.interfaces",
+    "shared.addresses.interfaces",
+]
+
+# D405 — Lote 8 (Rastreamento). Mecaniza D116/D285 ("Tracking observa, nunca decide o estado
+# operacional"): primeiro contrato módulo-inteiro-contra-módulo-inteiro do projeto — os contratos
+# acima restringem camada (domain/application) dentro do próprio módulo, nunca um bounded context
+# inteiro contra outro. `tracking` (todas as camadas) nunca importa nada de `modules.freight`.
+[[tool.importlinter.contracts]]
+name = "tracking never imports freight (D116/D285 — tracking observa, nunca decide o estado operacional)"
+type = "forbidden"
+source_modules = ["modules.tracking"]
+forbidden_modules = ["modules.freight"]
+
+# D421 — Lote 11 (BI). Mecaniza D090/D149 ("BI lê os módulos operacionais. Nenhum módulo
+# operacional depende de BI."): segundo contrato módulo-inteiro-contra-módulo-inteiro do projeto
+# (mesmo formato do D405 acima). Todo módulo operacional é proibido de importar `analytics`/
+# `reporting` em qualquer camada — a direção inversa (analytics/reporting importando módulos
+# operacionais, ex.: `AnalyticsCalculationEngine` lendo `modules.freight`) permanece livre, é
+# exatamente assim que BI lê.
+[[tool.importlinter.contracts]]
+name = "operational modules never import analytics/reporting (D090/D149/D421 — BI lê, nunca é lido pelos módulos operacionais)"
+type = "forbidden"
+source_modules = [
+    "modules.crm",
+    "modules.maintenance",
+    "modules.drivers",
+    "modules.financial",
+    "modules.fleet",
+    "modules.freight",
+    "modules.documents",
+    "modules.tracking",
+    "modules.mobile",
+    "modules.storage",
+    "modules.notification_center",
+    "modules.integration",
+    "modules.tenancy",
+    "modules.identity_access",
+]
+forbidden_modules = ["modules.analytics", "modules.reporting"]
+
+# D426 — Lote 12 (IA). Mecaniza D161 ("IA nunca decide, nunca altera operação diretamente"):
+# terceiro contrato módulo-inteiro-contra-módulo-inteiro do projeto (mesmo formato do D405/D421).
+# Todo módulo operacional (incluindo `analytics`/`reporting`, que também nunca decidem por conta
+# própria) é proibido de importar `ai` em qualquer camada — a direção inversa (`ai` importando um
+# módulo operacional, caso um calculador futuro precise ler dados reais) permanece livre.
+[[tool.importlinter.contracts]]
+name = "operational modules never import ai (D161/D426 — IA nunca decide, nunca é lida pelos módulos operacionais)"
+type = "forbidden"
+source_modules = [
+    "modules.crm",
+    "modules.maintenance",
+    "modules.drivers",
+    "modules.financial",
+    "modules.fleet",
+    "modules.freight",
+    "modules.documents",
+    "modules.tracking",
+    "modules.mobile",
+    "modules.storage",
+    "modules.notification_center",
+    "modules.integration",
+    "modules.analytics",
+    "modules.reporting",
+    "modules.tenancy",
+    "modules.identity_access",
+]
+forbidden_modules = ["modules.ai"]
