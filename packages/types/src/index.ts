@@ -394,3 +394,189 @@ export interface UpdateCostCenterRequest {
   nome?: string;
   status?: CostCenterStatus;
 }
+
+/* ── Frota (Veículo/Implemento/Composição/Hodômetro/Disponibilidade) ──
+ * Field lists and enum values copied verbatim from the real
+ * `*_schemas.py`/domain `value_objects/*.py` files (Sprint 12, Lote Frota
+ * audit). Notably: `Vehicle.operational` is ALWAYS empty (never populated by
+ * create/update) — always fetch `/veiculos/{id}/disponibilidade` for real
+ * status, never read this field. Composição has no PATCH/DELETE — D248,
+ * "editing" is POST-ing a whole new composition (server auto-closes the
+ * previous one). Odometer readings have no PATCH/DELETE either, and use
+ * cursor pagination, not offset. Availability is a pure read model — no
+ * write endpoint exists anywhere. Vehicle Document `type` is an unvalidated
+ * free string server-side despite looking like it should be an enum. */
+
+export type VehicleStatus = "ATIVO" | "INATIVO";
+export type FuelType = "DIESEL_S10" | "DIESEL_S500" | "GNV" | "ELETRICO";
+export type AvailabilityStatus = "DISPONIVEL" | "EM_VIAGEM" | "EM_MANUTENCAO" | "INATIVO";
+export type VehicleDocumentStatus = "VALIDO" | "VENCIDO";
+export type BodyType = "CARRETA" | "TANQUE" | "BAU" | "GRANELEIRO" | "PRANCHA" | "FRIGORIFICO" | "GAIOLA";
+export type ImplementAvailability = "DISPONIVEL" | "EM_USO" | "INATIVO";
+export type CombinationType = "SIMPLES" | "BITREM" | "RODOTREM";
+export type CompositionStatus = "VALIDA" | "INVALIDA";
+export type OdometerOrigin = "ABASTECIMENTO" | "CHECKLIST" | "MANUAL" | "TELEMETRIA";
+
+/** Always empty — `CreateVehicleHandler`/`UpdateVehicleHandler` never populate it. */
+export interface VehicleOperational {
+  status?: string;
+  current_driver_id?: UUID;
+  current_implement_id?: UUID;
+  updated_at?: string;
+}
+
+export interface Vehicle {
+  id: UUID;
+  identity: { codigo: string; plate: string; renavam: string };
+  status: VehicleStatus;
+  branch_id?: UUID;
+  operational: VehicleOperational;
+  audit: AuditMetadata;
+}
+
+export interface CreateVehicleRequest {
+  plate: string;
+  renavam: string;
+  fabricante: string;
+  modelo: string;
+  ano_fabricacao: number;
+  categoria_id: UUID;
+  branch_id?: UUID;
+}
+
+export interface UpdateVehicleRequest {
+  fabricante?: string;
+  modelo?: string;
+  ano_fabricacao?: number;
+  categoria_id?: UUID;
+  branch_id?: UUID;
+}
+
+export interface VehicleTechnicalSheet {
+  id: UUID;
+  manufacturer: string;
+  model: string;
+  manufacture_year: number;
+  category_id: UUID;
+  chassis: string;
+  engine?: string;
+  axles: number;
+  tare_weight: string;
+  load_capacity: string;
+  gross_vehicle_weight: string;
+  owner_rntrc?: string;
+  fuel_type: FuelType;
+}
+
+export interface UpsertVehicleTechnicalSheetRequest {
+  chassis?: string;
+  engine?: string;
+  axles?: number;
+  tare_weight?: string;
+  load_capacity?: string;
+  gross_vehicle_weight?: string;
+  owner_rntrc?: string;
+  fuel_type?: FuelType;
+}
+
+/** `type` is a free string server-side — no enum/vocabulary validation despite looking like one. */
+export interface VehicleDocument {
+  id: UUID;
+  type: string;
+  number: string;
+  expires_at: string;
+  status: VehicleDocumentStatus;
+  file_id?: UUID;
+}
+
+export interface CreateVehicleDocumentRequest {
+  type: string;
+  number: string;
+  expires_at: string;
+  file_id?: UUID;
+}
+
+export interface UpdateVehicleDocumentRequest {
+  number?: string;
+  expires_at?: string;
+  file_id?: UUID;
+}
+
+export interface Implement {
+  id: UUID;
+  codigo: string;
+  plate: string;
+  renavam: string;
+  body_type: BodyType;
+  category_id: UUID;
+  load_capacity: string;
+  availability_status: ImplementAvailability;
+}
+
+export interface CreateImplementRequest {
+  plate: string;
+  renavam: string;
+  body_type: BodyType;
+  category_id: UUID;
+  load_capacity: string;
+}
+
+export interface UpdateImplementRequest {
+  body_type?: BodyType;
+  load_capacity?: string;
+  availability_status?: ImplementAvailability;
+}
+
+/** No PATCH/DELETE anywhere (D248) — only POST (new) and POST .../commands/validate. */
+export interface VehicleComposition {
+  id: UUID;
+  tractor_unit_id: UUID;
+  combination_type: CombinationType;
+  total_axles: number;
+  status: CompositionStatus;
+  implements: Array<{ implement_id: UUID; order: number }>;
+  starts_at: ISODateTime;
+  ends_at?: ISODateTime;
+}
+
+export interface CreateVehicleCompositionRequest {
+  tractor_unit_id: UUID;
+  combination_type: CombinationType;
+  total_axles: number;
+  implements: Array<{ implement_id: UUID; order: number }>;
+}
+
+/** No PATCH/DELETE — append-only Time Series. */
+export interface OdometerReading {
+  id: UUID;
+  value_km: string;
+  origin: OdometerOrigin;
+  trip_id?: UUID;
+  captured_at: ISODateTime;
+}
+
+export interface CreateOdometerReadingRequest {
+  value_km: string;
+  origin: OdometerOrigin;
+  trip_id?: UUID;
+}
+
+/** Cursor-paginated, unlike every other list in the app (offset `page/limit/total`). */
+export interface CursorPaginatedResponse<T> {
+  data: T[];
+  meta: { pagination: { next_cursor?: string; has_more: boolean } };
+}
+
+/**
+ * Pure read model — no write endpoint exists anywhere for this resource. The
+ * projector that computes it is not yet wired to real trip/maintenance
+ * events in this environment (Lote Frota audit) — data may lag behind
+ * actual operations; still real API data, just show it as-is.
+ */
+export interface VehicleAvailability {
+  vehicle_id: UUID;
+  status: AvailabilityStatus;
+  current_driver_id?: UUID;
+  current_implement_id?: UUID;
+  updated_at: ISODateTime;
+}

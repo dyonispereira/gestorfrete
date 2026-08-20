@@ -6,7 +6,7 @@ const CONTAINER = process.env.E2E_POSTGRES_CONTAINER ?? "gestorfrete-postgres-1"
 const DB_USER = process.env.E2E_POSTGRES_USER ?? "gestorfrete";
 const DB_NAME = process.env.E2E_POSTGRES_DB ?? "gestorfrete";
 
-const FIXTURE_FILES = ["teardown.sql", "cadastros-teardown.sql"];
+const FIXTURE_FILES = ["teardown.sql", "cadastros-teardown.sql", "frota-teardown.sql"];
 
 export default function globalTeardown(): void {
   for (const file of FIXTURE_FILES) {
