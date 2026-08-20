@@ -106,3 +106,50 @@ export interface ApiErrorBody {
     correlation_id?: string;
   };
 }
+
+/**
+ * Real shape of `meta.pagination` on every offset-paginated list endpoint
+ * (`user_router.py`/`role_router.py`/`permission_router.py`) — `page`/
+ * `limit`/`total`, NOT the `total_items`/`total_pages` that `PAGINATION.md`
+ * describes. Follows the code, not the stale doc.
+ */
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: { pagination: PaginationMeta };
+}
+
+/** `GET /users` item shape is identical to `AuthUser` (`UserResponse = UserSummaryResponse` in the Backend). */
+export type User = AuthUser;
+
+export interface CreateUserRequest {
+  nome: string;
+  email: string;
+  password: string;
+  driver_id?: UUID;
+  employee_id?: UUID;
+  role_ids: UUID[];
+}
+
+export interface UpdateUserRequest {
+  nome?: string;
+  email?: string;
+  role_ids?: UUID[];
+}
+
+export interface CreateRoleRequest {
+  nome: string;
+  descricao?: string;
+  permissions: string[];
+}
+
+export interface UpdateRoleRequest {
+  nome?: string;
+  descricao?: string;
+  permissions?: string[];
+}

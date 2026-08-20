@@ -38,11 +38,13 @@ export interface NavGroup {
  * here. This list is static (there are only so many bounded contexts), but
  * what actually renders in the Sidebar is computed at runtime from the
  * User's resolved permissions (`PermissionsProvider`) — see
- * `useAuthorizedNav`. Sprint 12's own lote order (Cadastros → Frota →
- * Operação → Manutenção → Financeiro → Fiscal → Tracking → BI/IA) is what
- * `implemented` will flip on, module by module, as each lote lands; until
- * then the item is real and permission-gated, it just opens the shared
- * "módulo ainda não implementado" placeholder instead of a business screen.
+ * `useAuthorizedNav`. `implemented` flips on, module by module, as each
+ * lote lands; until then the item is real and permission-gated, it just
+ * opens the shared "módulo ainda não implementado" placeholder instead of a
+ * business screen. Identity (`usuarios`/`papeis`/`permissoes`) landed first
+ * — deliberately, to validate the Shell (tables/forms/drawers/RBAC) against
+ * real data before any other lote reuses the same pattern; every other item
+ * below is still a placeholder.
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -203,18 +205,29 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "users",
         label: "Usuários",
-        href: "/m/users",
+        href: "/usuarios",
         icon: Users,
         requiredPermissions: ["identity_access.user.view"],
+        implemented: true,
         description: "Usuários do tenant.",
       },
       {
         id: "roles",
-        label: "Papéis e Permissões",
-        href: "/m/roles",
+        label: "Papéis",
+        href: "/papeis",
         icon: ShieldCheck,
         requiredPermissions: ["identity_access.role.view"],
-        description: "RBAC — papéis e permissões.",
+        implemented: true,
+        description: "RBAC — papéis e as permissões que cada um concede.",
+      },
+      {
+        id: "permissions",
+        label: "Permissões",
+        href: "/permissoes",
+        icon: ShieldCheck,
+        requiredPermissions: ["identity_access.permission.view"],
+        implemented: true,
+        description: "Catálogo de permissões do sistema.",
       },
       {
         id: "branches",
