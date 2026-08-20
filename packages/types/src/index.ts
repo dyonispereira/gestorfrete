@@ -153,3 +153,244 @@ export interface UpdateRoleRequest {
   descricao?: string;
   permissions?: string[];
 }
+
+/* ── Cadastros (Cliente/Fornecedor/Motorista/Funcionário/Centro de Custo) ──
+ * Field lists and enum values below are copied verbatim from the real
+ * `*_schemas.py`/`*_status.py`/`*_type.py` files (Sprint 12, Lote Cadastros
+ * audit) — never invented by analogy with another entity. Notably:
+ * `EmployeeResponse` really has no phone/email/CPF; `CostCenter` really has
+ * no DELETE and no way to list Filiais for `branch_id`; Address/Contact
+ * list endpoints don't paginate for real despite returning the pagination
+ * envelope shape. */
+
+export type ClientStatus = "ATIVO" | "INATIVO";
+
+export interface Client {
+  id: UUID;
+  codigo: string;
+  razao_social: string;
+  nome_fantasia?: string;
+  document: string;
+  telefone?: string;
+  email?: string;
+  status: ClientStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateClientRequest {
+  razao_social: string;
+  nome_fantasia?: string;
+  document: string;
+  telefone?: string;
+  email?: string;
+}
+
+export interface UpdateClientRequest {
+  razao_social?: string;
+  nome_fantasia?: string;
+  telefone?: string;
+  email?: string;
+}
+
+/** `contatos_cliente` — exclusive to Cliente, not polymorphic. No `audit.created_by/updated_by` (table has no such columns). */
+export interface Contact {
+  id: UUID;
+  nome: string;
+  cargo?: string;
+  telefone?: string;
+  email?: string;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface CreateContactRequest {
+  nome: string;
+  cargo?: string;
+  telefone?: string;
+  email?: string;
+}
+
+export interface UpdateContactRequest {
+  nome?: string;
+  cargo?: string;
+  telefone?: string;
+  email?: string;
+}
+
+/** `shared/addresses` — polymorphic across Cliente/Fornecedor (Filial has no router yet). No permission of its own; reuses the owner's `*.view`/`*.edit`. */
+export type AddressType = "PRINCIPAL" | "COBRANCA" | "ENTREGA" | "OUTRO";
+
+export interface Address {
+  id: UUID;
+  type: AddressType;
+  logradouro: string;
+  numero?: string;
+  complemento?: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+  audit: AuditMetadata;
+}
+
+export interface CreateAddressRequest {
+  type: AddressType;
+  logradouro: string;
+  numero?: string;
+  complemento?: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+}
+
+export interface UpdateAddressRequest {
+  type?: AddressType;
+  logradouro?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
+}
+
+export type SupplierStatus = "ATIVO" | "INATIVO";
+export type SupplierCategory =
+  | "PECA"
+  | "RECAPAGEM"
+  | "SEGURO"
+  | "OFICINA"
+  | "POSTO"
+  | "BORRACHARIA"
+  | "GUINCHO"
+  | "OUTRO";
+
+export interface Supplier {
+  id: UUID;
+  codigo: string;
+  razao_social: string;
+  cnpj: string;
+  telefone?: string;
+  category?: SupplierCategory;
+  status: SupplierStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateSupplierRequest {
+  razao_social: string;
+  cnpj: string;
+  telefone?: string;
+  category?: SupplierCategory;
+}
+
+export interface UpdateSupplierRequest {
+  razao_social?: string;
+  telefone?: string;
+  category?: SupplierCategory;
+}
+
+export type DriverEmploymentType = "EMPREGADO" | "AUTONOMO";
+/** Computed by `block()`/`unblock()` — never accepted in a create/update body. */
+export type DriverFitnessStatus = "APTO" | "BLOQUEADO";
+
+export interface Driver {
+  id: UUID;
+  codigo: string;
+  nome: string;
+  cpf: string;
+  telefone?: string;
+  email?: string;
+  employment_type: DriverEmploymentType;
+  fitness_status: DriverFitnessStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateDriverRequest {
+  nome: string;
+  cpf: string;
+  telefone?: string;
+  email?: string;
+  employment_type: DriverEmploymentType;
+}
+
+export interface UpdateDriverRequest {
+  nome?: string;
+  telefone?: string;
+  email?: string;
+}
+
+export type DriverDocumentType = "CNH" | "RG" | "EXAME_TOXICOLOGICO" | "REGISTRO_ANTT";
+export type CnhCategory = "A" | "B" | "C" | "D" | "E";
+/** Computed from `expires_at` on read — never accepted in a create/update body. */
+export type DriverDocumentStatus = "VALIDO" | "VENCIDO";
+
+export interface DriverDocument {
+  id: UUID;
+  type: DriverDocumentType;
+  number: string;
+  cnh_category?: CnhCategory;
+  expires_at?: string;
+  status: DriverDocumentStatus;
+}
+
+export interface CreateDriverDocumentRequest {
+  type: DriverDocumentType;
+  number: string;
+  cnh_category?: CnhCategory;
+  expires_at?: string;
+}
+
+export interface UpdateDriverDocumentRequest {
+  number?: string;
+  cnh_category?: CnhCategory;
+  expires_at?: string;
+}
+
+export type EmployeeStatus = "ATIVO" | "INATIVO";
+
+/** Leanest of the Cadastros entities — really has no phone/email/CPF/address/contact/documents. */
+export interface Employee {
+  id: UUID;
+  codigo: string;
+  nome: string;
+  cargo: string;
+  hired_at?: string;
+  status: EmployeeStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateEmployeeRequest {
+  nome: string;
+  cargo: string;
+  hired_at?: string;
+}
+
+export interface UpdateEmployeeRequest {
+  nome?: string;
+  cargo?: string;
+  hired_at?: string;
+}
+
+export type CostCenterStatus = "ATIVO" | "INATIVO";
+
+export interface CostCenter {
+  id: UUID;
+  codigo: string;
+  accounting_code: string;
+  nome: string;
+  branch_id?: UUID;
+  status: CostCenterStatus;
+  audit: AuditMetadata;
+}
+
+/** No `branch_id` in the create form — no endpoint exists to list Filiais to pick from (see Lote Cadastros plan). */
+export interface CreateCostCenterRequest {
+  accounting_code: string;
+  nome: string;
+}
+
+export interface UpdateCostCenterRequest {
+  nome?: string;
+  status?: CostCenterStatus;
+}

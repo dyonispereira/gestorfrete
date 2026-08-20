@@ -22,3 +22,4 @@ export * from "./components/alert-dialog";
 export * from "./components/textarea";
 export * from "./components/pagination";
 export * from "./components/toaster";
+export * from "./components/tabs";

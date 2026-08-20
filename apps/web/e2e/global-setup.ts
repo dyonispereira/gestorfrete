@@ -11,11 +11,14 @@ const DB_NAME = process.env.E2E_POSTGRES_DB ?? "gestorfrete";
  * fixtures a fresh tenant + its first Users/Papéis need can only be seeded directly against
  * Postgres, via the same `docker exec ... psql` mechanism validated by hand earlier this session.
  */
+const FIXTURE_FILES = ["seed.sql", "cadastros-seed.sql"];
+
 export default function globalSetup(): void {
-  const sqlPath = path.join(__dirname, "fixtures", "seed.sql");
-  const sql = fs.readFileSync(sqlPath, "utf-8");
-  execFileSync("docker", ["exec", "-i", CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, "-v", "ON_ERROR_STOP=1"], {
-    input: sql,
-    stdio: ["pipe", "inherit", "inherit"],
-  });
+  for (const file of FIXTURE_FILES) {
+    const sql = fs.readFileSync(path.join(__dirname, "fixtures", file), "utf-8");
+    execFileSync("docker", ["exec", "-i", CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, "-v", "ON_ERROR_STOP=1"], {
+      input: sql,
+      stdio: ["pipe", "inherit", "inherit"],
+    });
+  }
 }
