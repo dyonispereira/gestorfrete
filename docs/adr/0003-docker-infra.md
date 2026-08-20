@@ -36,3 +36,17 @@ could not access file "$libdir/postgis-3"`), mesmo com migrations aplicadas com 
 biblioteca compartilhada da extensão nunca esteve presente na imagem — só validado antes contra
 um Postgres portátil com PostGIS instalado manualmente (`docs/backend/TESTING_STRATEGY.md`,
 Sprint 11 Lote 8), nunca contra este `docker-compose.yml`.
+
+## Atualização (D432) — limitação conhecida de collation em imagens Alpine
+
+Tanto `postgres:16-alpine` quanto `postgis/postgis:16-3.4-alpine` rodam sobre musl libc (Alpine
+Linux), que não implementa collation versionada como o glibc — `pg_database.datcollversion` fica
+com um valor registrado (`2.31`) que o musl nunca consegue re-confirmar, e todo `psql` emite
+`WARNING: database "gestorfrete" has no actual collation version, but a version was recorded`.
+Isso não é só cosmético: descoberto ao investigar por que `UNIQUE(codigo)` de `permissoes` deixou
+17 códigos duplicados passarem (D432 em `DECISIONS.md`) — o índice único ficou momentaneamente
+inconsistente até um `REINDEX DATABASE`. `ALTER DATABASE gestorfrete REFRESH COLLATION VERSION`
+falha (`invalid collation version change`, `NULL` vs. `2.31`) porque musl não tem uma versão
+"atual" para reportar — decisão do usuário foi manter o aviso e confiar em `REINDEX DATABASE`
+sempre que a imagem base do Postgres mudar, em vez de recriar o banco com ICU ou locale `C`/
+`POSIX` (mudança maior, registrada como dívida técnica, não bloqueante).
