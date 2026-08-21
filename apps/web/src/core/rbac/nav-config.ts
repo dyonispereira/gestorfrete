@@ -155,10 +155,11 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "trips",
         label: "Viagens",
-        href: "/m/trips",
+        href: "/viagens",
         icon: ClipboardList,
         requiredPermissions: ["freight.trip.view"],
         description: "Viagens e entregas.",
+        implemented: true,
       },
     ],
   },

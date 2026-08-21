@@ -580,3 +580,255 @@ export interface VehicleAvailability {
   current_implement_id?: UUID;
   updated_at: ISODateTime;
 }
+
+/* ── Operação (Viagem/Entrega/Ocorrência/Canhoto/Alocação/Timeline/Comentários/Anexos) ──
+ * Field lists and enum values copied verbatim from the real `*_schemas.py`/domain
+ * `value_objects/*.py` files (Sprint 13, Lote Operação audit). Notably: Trip status is
+ * command-only — `PATCH /viagens/{id}` only touches `data_programada`/`janela_programada`, never
+ * `status`; every transition is a `POST .../commands/<verb>`. `references.*` are live entity IDs;
+ * `snapshots.*` freeze at creation (`client_snapshot`) or dispatch (`driver_name_snapshot`/
+ * `tractor_unit_plate_snapshot`) and never re-sync. `financials.*`/`status.fiscal`/
+ * `status.financial` are always readOnly — driven by future `documents`/`financial` module
+ * events, no command sets them directly. Delivery `status` IS directly PATCH-editable (the one
+ * exception to command-only). No DELETE exists anywhere in this module except `DELETE /viagens/
+ * {id}` itself (blocked outside RASCUNHO/PLANEJADA). ProofOfDelivery and TripStatusHistoryEntry
+ * have no update method at all once created — immutable. TripAllocation is append-only: `POST
+ * /resources` only works once, `POST .../commands/reallocate-resources` supersedes it (old row →
+ * SUBSTITUIDA, new row inserted), never PATCH/DELETE. Timeline is GET-only, forever (D187/D236). */
+
+export type TripOperationalStatus =
+  | "RASCUNHO"
+  | "PLANEJADA"
+  | "AGUARDANDO_CHECKLIST"
+  | "LIBERADA"
+  | "EM_DESLOCAMENTO"
+  | "CARREGANDO"
+  | "EM_TRANSITO"
+  | "EM_ENTREGA"
+  | "FINALIZADA"
+  | "INTERROMPIDA"
+  | "CANCELADA";
+
+export type TripFiscalStatus = "PENDENTE" | "CTE_EMITIDO" | "MDFE_EMITIDO" | "MDFE_ENCERRADO" | "CTE_CANCELADO";
+export type TripFinancialStatus = "AGUARDANDO_FATURAMENTO" | "FATURADA" | "AGUARDANDO_RECEBIMENTO" | "RECEBIDA";
+export type DeliveryStatus = "PENDENTE" | "CONCLUIDA" | "RECUSADA" | "DEVOLVIDA" | "CANCELADA";
+export type OccurrenceType = "ATRASO" | "AVARIA" | "PANE" | "SINISTRO" | "OUTRO";
+export type OccurrenceSeverity = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
+export type OccurrenceStatus = "ABERTA" | "RESOLVIDA";
+export type ProofOfDeliveryStatus = "PENDENTE" | "REGISTRADO";
+export type AllocationStatus = "VIGENTE" | "SUBSTITUIDA";
+
+export interface TripReferences {
+  client_id: UUID;
+  driver_id?: UUID;
+  tractor_unit_id?: UUID;
+}
+
+export interface TripSnapshots {
+  driver_name_snapshot?: string;
+  tractor_unit_plate_snapshot?: string;
+  client_snapshot?: Record<string, unknown>;
+  predicted_revenue_snapshot?: string;
+  applied_price_table_id?: UUID;
+}
+
+export interface TripStatus {
+  operational: TripOperationalStatus;
+  fiscal: TripFiscalStatus;
+  financial: TripFinancialStatus;
+  closed: boolean;
+}
+
+export interface TripFinancials {
+  predicted_cost?: string;
+  actual_cost?: string;
+  actual_revenue?: string;
+  predicted_margin?: string;
+  actual_margin?: string;
+  financial_deviation?: string;
+}
+
+export interface Trip {
+  id: UUID;
+  codigo: string;
+  scheduled_date?: string;
+  scheduled_window?: ISODateTime;
+  references: TripReferences;
+  snapshots: TripSnapshots;
+  status: TripStatus;
+  financials: TripFinancials;
+  distance_traveled_km?: string;
+  audit: AuditMetadata;
+}
+
+export interface CreateTripRequest {
+  cliente_id: UUID;
+  data_programada?: string;
+  janela_programada?: ISODateTime;
+}
+
+export interface UpdateTripRequest {
+  data_programada?: string;
+  janela_programada?: ISODateTime;
+}
+
+export interface InterromperTripRequest {
+  notes: string;
+}
+
+export interface CancelarTripRequest {
+  notes: string;
+}
+
+export interface CloseAdministrativeTripRequest {
+  justification: string;
+}
+
+/** Atomic package (driver+tractor+implement) — never edited in place (D188), see module doc above. */
+export interface TripAllocation {
+  id: UUID;
+  driver_id: UUID;
+  tractor_unit_id: UUID;
+  implement_id?: UUID;
+  status: AllocationStatus;
+  replacement_reason?: string;
+  created_at: ISODateTime;
+}
+
+export interface CreateTripAllocationRequest {
+  driver_id: UUID;
+  tractor_unit_id: UUID;
+  implement_id?: UUID;
+}
+
+export interface ReallocateTripResourcesRequest {
+  driver_id: UUID;
+  tractor_unit_id: UUID;
+  implement_id?: UUID;
+  reason: string;
+}
+
+export interface DeliveryWindow {
+  starts_at: ISODateTime;
+  ends_at: ISODateTime;
+}
+
+/** No `audit` — `entregas` has no timestamp/actor columns at all (D381). */
+export interface Delivery {
+  id: UUID;
+  order: number;
+  recipient: string;
+  delivery_address: Record<string, unknown>;
+  status: DeliveryStatus;
+  completed_at?: ISODateTime;
+  rejection_reason?: string;
+  window?: DeliveryWindow;
+}
+
+export interface CreateDeliveryRequest {
+  order: number;
+  recipient: string;
+  delivery_address: Record<string, unknown>;
+  window?: DeliveryWindow;
+}
+
+export interface UpdateDeliveryRequest {
+  recipient?: string;
+  delivery_address?: Record<string, unknown>;
+  status?: DeliveryStatus;
+  rejection_reason?: string;
+}
+
+/** No `update()` at all — immutable once registered (1:1 with Delivery). */
+export interface ProofOfDelivery {
+  id: UUID;
+  status: ProofOfDeliveryStatus;
+  registered_at?: ISODateTime;
+  signature_file_id?: UUID;
+}
+
+export interface RegisterProofOfDeliveryRequest {
+  signature_file_id?: UUID;
+}
+
+/** No `audit`. `location` is accepted on create but not persisted — no column exists (documented gap). */
+export interface Occurrence {
+  id: UUID;
+  type: OccurrenceType;
+  description: string;
+  severity?: OccurrenceSeverity;
+  status: OccurrenceStatus;
+  occurred_at: ISODateTime;
+}
+
+export interface CreateOccurrenceRequest {
+  type: OccurrenceType;
+  description: string;
+  severity?: OccurrenceSeverity;
+  occurred_at: ISODateTime;
+  location?: { latitude: number; longitude: number };
+}
+
+export interface UpdateOccurrenceRequest {
+  description?: string;
+  severity?: OccurrenceSeverity;
+  status?: OccurrenceStatus;
+}
+
+/**
+ * `GET /viagens/{id}/financeiro` (D389) — individual field groups are `null` when the actor
+ * lacks the matching permission (`financial.trip_predicted_value.view` / `_actual_value.view` /
+ * `_margin.view`), never a partial `403`. Render `null` as "—", not as missing/broken data.
+ */
+export interface TripFinancialsView {
+  financial_status: TripFinancialStatus;
+  predicted_revenue?: string;
+  predicted_cost?: string;
+  predicted_margin?: string;
+  actual_revenue?: string;
+  actual_cost?: string;
+  actual_margin?: string;
+  financial_deviation?: string;
+}
+
+/** Cursor-paginated, GET-only forever (D187/D236) — merges status history + occurrences + comments/attachments. */
+export interface TripTimelineEntry {
+  occurred_at: ISODateTime;
+  source: string;
+  summary: string;
+  reference_id: UUID;
+}
+
+/** `comentarios` has no real update timestamp — `audit.updated_at`/`updated_by` always mirror `created_at`/`created_by` even after a real PATCH (D400/D381-family). */
+export interface TripComment {
+  id: UUID;
+  text: string;
+  visible_to_client: boolean;
+  author_id: UUID;
+  audit: AuditMetadata;
+}
+
+export interface CreateCommentRequest {
+  text: string;
+  visible_to_client?: boolean;
+}
+
+export interface UpdateCommentRequest {
+  text?: string;
+  visible_to_client?: boolean;
+}
+
+/** `anexos` has no `atualizado_em`/`atualizado_por` — immutable, same audit-mirroring caveat as Comment. */
+export interface TripAttachment {
+  id: UUID;
+  attachment_type: string;
+  file_id: UUID;
+  description?: string;
+  audit: AuditMetadata;
+}
+
+export interface CreateAttachmentRequest {
+  attachment_type: string;
+  file_id: UUID;
+  description?: string;
+}
