@@ -832,3 +832,157 @@ export interface CreateAttachmentRequest {
   file_id: UUID;
   description?: string;
 }
+
+/* ── Documentos Fiscais (CT-e/MDF-e/Carta de Correção/NF-e Referenciada/Configuração Fiscal/
+ * Eventos Fiscais) ── Field lists and enum values copied verbatim from the real
+ * `*_schemas.py`/domain `value_objects/*.py` files (Sprint 14, Lote Documentos Fiscais audit).
+ * CIOT is deliberately out of scope — `MODULE_PRIORITY.md` places it in V2 even though its
+ * backend already exists; no CIOT types here. Notably: there is no `POST /ctes` — a CT-e is only
+ * ever auto-created by `freight`'s `DispatchTripHandler` on trip dispatch (D396), which is itself
+ * unreachable via this UI today (Lote Operação found `LIBERADA` has no path in). Every status
+ * transition is `POST .../commands/<verbo>`, never PATCH (D274). CT-e/MDF-e rows are never
+ * deleted, even cancelled/inutilized (D109). `AUTORIZADO`/`DENEGADO` (CT-e) and `PENDENTE→
+ * AUTORIZADO` (MDF-e) are only reachable via a test-only SEFAZ-response simulator with no HTTP
+ * path (D397) — a CT-e built through this UI can never progress past `TRANSMITIDO` in this
+ * environment. `mdfes`/`ciots`/`configuracoes_fiscais_tenant` have no `audit`/timestamp columns
+ * at all in the frozen DDL (D400) — omitted here, never fabricated. */
+
+export type CteStatus = "RASCUNHO" | "VALIDADO" | "ASSINADO" | "TRANSMITIDO" | "AUTORIZADO" | "CANCELADO" | "DENEGADO" | "INUTILIZADO";
+export type MdfeStatus = "PENDENTE" | "AUTORIZADO" | "ENCERRADO" | "CANCELADO";
+export type FiscalConfigurationEnvironment = "PRODUCAO" | "HOMOLOGACAO";
+export type FiscalConfigurationStatus = "ATIVA" | "INATIVA";
+export type FiscalEventDocumentType = "CTE" | "MDFE" | "CIOT";
+export type FiscalEventType = "REQUISICAO" | "RESPOSTA";
+export type FiscalEventResult = "SUCESSO" | "FALHA" | "TIMEOUT";
+
+/** D400 — `ctes` só tem `criado_em`/`atualizado_em`; `created_by`/`updated_by` sempre `null`. */
+export interface Cte {
+  id: UUID;
+  trip_id: UUID;
+  number: string;
+  series: string;
+  access_key?: string;
+  service_value: string;
+  status: CteStatus;
+  xml_file_id?: UUID;
+  sefaz_protocol?: string;
+  authorized_at?: ISODateTime;
+  audit: AuditMetadata;
+}
+
+export interface CancelCteRequest {
+  notes: string;
+}
+
+/** Sem `audit` — `mdfes` não tem nenhuma coluna de timestamp na DDL congelada (D400). */
+export interface Mdfe {
+  id: UUID;
+  trip_id: UUID;
+  number: string;
+  series: string;
+  access_key?: string;
+  status: MdfeStatus;
+  cte_ids: UUID[];
+  xml_file_id?: UUID;
+  sefaz_protocol?: string;
+  closed_at?: ISODateTime;
+}
+
+export interface CreateMdfeRequest {
+  trip_id: UUID;
+  cte_ids: UUID[];
+}
+
+export interface CancelMdfeRequest {
+  notes: string;
+}
+
+/** Compartilhado por CT-e/MDF-e status-history (D284) — cursor-paginado, GET-only para sempre. */
+export interface StatusHistoryEntry {
+  id: UUID;
+  status: string;
+  user_id?: UUID;
+  origin: string;
+  notes?: string;
+  occurred_at: ISODateTime;
+}
+
+/** D276 — nunca o XML embutido, só a referência ao artefato em Storage; sem endpoint de download binário ainda. */
+export interface XmlReference {
+  xml_file_id: UUID;
+  generated_at?: ISODateTime;
+}
+
+/** Só aceita com CT-e pai AUTORIZADO (D282) — append-only, sem edição/exclusão. */
+export interface CorrectionLetter {
+  id: UUID;
+  sequence_number: number;
+  correction_text: string;
+  xml_file_id?: UUID;
+  sent_at: ISODateTime;
+}
+
+export interface CreateCorrectionLetterRequest {
+  correction_text: string;
+}
+
+/** Sem gate de status do CT-e pai — append-only, sem edição/exclusão. */
+export interface ReferencedNfe {
+  id: UUID;
+  access_key: string;
+  xml_file_id?: UUID;
+}
+
+export interface CreateReferencedNfeRequest {
+  access_key: string;
+}
+
+/** Sem `audit` — `configuracoes_fiscais_tenant` não tem coluna de timestamp na DDL congelada (D400). Singular por tenant. */
+export interface FiscalConfiguration {
+  id: UUID;
+  certificate_file_id: UUID;
+  certificate_expires_at: string;
+  environment: FiscalConfigurationEnvironment;
+  tax_regime: string;
+  cte_series: string;
+  next_cte_number: number;
+  mdfe_series: string;
+  next_mdfe_number: number;
+  status: FiscalConfigurationStatus;
+}
+
+/**
+ * `PATCH` — cada campo exige sua própria permissão (D267-style); enviar um campo sem a permissão
+ * correspondente rejeita a requisição inteira, nunca um PATCH parcialmente aplicado:
+ * `tax_regime`→`documents.fiscal_config.edit`; `certificate_file_id`/`certificate_expires_at`→
+ * `documents.fiscal_config.manage_certificate`; `cte_series`/`mdfe_series`→
+ * `documents.fiscal_config.manage_series`; `environment`→`documents.fiscal_config.switch_environment`.
+ */
+export interface UpdateFiscalConfigurationRequest {
+  tax_regime?: string;
+  certificate_file_id?: UUID;
+  certificate_expires_at?: string;
+  cte_series?: string;
+  mdfe_series?: string;
+  environment?: FiscalConfigurationEnvironment;
+}
+
+/**
+ * D277 — somente leitura para usuários, todo campo readOnly. Log técnico bruto (D105), distinto
+ * dos `*StatusHistory` de negócio — em ambientes sem o simulador de resposta SEFAZ acionado, esta
+ * lista fica vazia (nada no caminho HTTP alcançável grava uma linha aqui).
+ */
+export interface FiscalEvent {
+  id: UUID;
+  document_type: FiscalEventDocumentType;
+  document_id: UUID;
+  event_type: FiscalEventType;
+  payload_file_id: UUID;
+  external_protocol?: string;
+  started_at: ISODateTime;
+  finished_at?: ISODateTime;
+  duration_ms?: number;
+  attempt_number: number;
+  result?: FiscalEventResult;
+  origin: string;
+}
