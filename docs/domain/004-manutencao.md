@@ -4,6 +4,14 @@ Entidades de manutenção (Ordem de Serviço e correlatas) do GestorFrete. Templ
 campos (ver [`README.md`](./README.md)). Ver [`ENTITY_CATALOG.md`](./ENTITY_CATALOG.md) para o
 índice completo desta categoria.
 
+**Reconciliação (9 entidades, era 8)**: `Checklist` estava referenciada desde a fundação por
+`ChecklistReprovado`/`ChecklistAprovado` (`../product/EVENT_MAP.md`) e por `Trip.status_operacional
+= AGUARDANDO_CHECKLIST` (`freight`), mas nunca tinha sido formalizada como entidade própria — a nota
+em [`../database/relational/005-manutencao.md`](../database/relational/005-manutencao.md) dizia
+explicitamente "não modelado neste lote" (D101/D102: nenhuma tabela nasce sem a entidade existir
+aqui primeiro). Formalizada agora porque o desbloqueio real de `AGUARDANDO_CHECKLIST → LIBERADA`
+(gap identificado nos Lotes Operação e Documentos Fiscais) depende dela.
+
 ---
 
 ## Ordem de Serviço
@@ -237,3 +245,50 @@ campos (ver [`README.md`](./README.md)). Ver [`ENTITY_CATALOG.md`](./ENTITY_CATA
 - **Dependências proibidas**: Cliente, CT-e, Financeiro, Viagem.
 - **Dono da Timeline**: Aggregate Ordem de Serviço.
 - **Capacidade Offline**: Não.
+
+## Checklist
+
+- **Objetivo**: Registrar a verificação estruturada de um veículo/carga num ponto de controle
+  (saída, retorno, oficina, carregamento, descarga, ou periódica administrativa) e formalizar sua
+  aprovação ou reprovação (ver [`../product/GLOSSARY.md`](../product/GLOSSARY.md)).
+- **Responsabilidades**: Coletar respostas item a item contra um conjunto de itens de verificação;
+  decidir Aprovado/Reprovado; gatilhar o efeito correspondente na entidade referenciada (libera
+  `AGUARDANDO_CHECKLIST → LIBERADA` na Viagem quando `TIPO = MOTORISTA_SAIDA`; bloqueia conclusão de
+  Ordem de Serviço quando `TIPO = OFICINA`). Máquina de estados canônica em
+  [`../flows/007-CHECKLIST.md`](../flows/007-CHECKLIST.md) (D035).
+- **O que não faz**: Não decide por si só o que é "item crítico" fora do próprio registro do item
+  (sem um "Modelo de Checklist" com aprovação/versionamento próprios nesta fundação — cada item
+  carrega sua própria flag `crítico`, deliberadamente simples); não altera o estado de Viagem/Ordem
+  de Serviço diretamente — publica o evento correspondente, quem aplica a transição é o dono da
+  entidade referenciada (mesmo princípio de D116, `tracking` é observacional).
+- **Aggregate Root**: Sim.
+- **Bounded Context proprietário**: `maintenance`
+- **Principais relacionamentos**: Viagem ou Ordem de Serviço (referência polimórfica — `TIPO_
+  REFERENCIA`/`REFERENCIA_ID`, mesmo padrão de Anexo/Comentário, D024/D023); Veículo Tracionador,
+  Motorista (referenciados por ID, capturados no momento da criação — não ressincronizam, mesmo
+  princípio de snapshot da Viagem, D038); Item de Checklist (parte do agregado, não entidade própria
+  nesta fundação — ver "O que não faz").
+- **Eventos que publica**: `ChecklistIniciado`, `ChecklistConcluido`, `ChecklistAprovado`,
+  `ChecklistReprovado` (já catalogados em [`../product/EVENT_MAP.md`](../product/EVENT_MAP.md)).
+- **Eventos que consome**: Nenhum — reage ao estado da entidade referenciada, não a eventos de
+  outros bounded contexts (mesma disciplina de D105: interpretar estado, não side-effect de evento).
+- **Invariantes**: um Checklist `Aprovado`/`Reprovado` nunca é reaberto — uma reprovação sempre gera
+  um novo registro `Pendente` referenciando o reprovado, nunca reescreve o original (mesmo princípio
+  de D017/D018 aplicado à própria entidade, não só ao histórico).
+- **Regras de negócio associadas**: D015–D018 (máquina de estados + histórico).
+- **Estados**: Ver `007-CHECKLIST.md` (fonte canônica, D035) — `Pendente → Em Preenchimento →
+  Concluído → {Aprovado, Reprovado}`.
+- **Auditoria**: D007 — observação obrigatória em `Reprovado`.
+- **Linha do tempo (Timeline Universal)**: sim, na Viagem/Ordem de Serviço referenciada.
+- **Anexos suportados**: foto de item reprovado (D024).
+- **Comentários suportados**: Não nesta fundação — a observação da reprovação já cumpre esse papel.
+- **KPIs relacionados**: taxa de reprovação por tipo, tempo médio de preenchimento.
+- **Documentos canônicos relacionados**: `007-CHECKLIST.md`.
+- **Evoluções futuras previstas**: Modelo de Checklist configurável por tenant (itens/pesos/
+  criticidade versionados), hoje fora de escopo (ver "O que não faz").
+- **Dependências obrigatórias**: Veículo Tracionador; Viagem ou Ordem de Serviço (a referência).
+- **Dependências proibidas**: Cliente, CT-e, Financeiro (mesmo isolamento de Ordem de Serviço acima).
+- **Dono da Timeline**: Aggregate Checklist (este próprio), consumido pela Timeline do referenciado.
+- **Capacidade Offline**: Sim, para `TIPO ∈ {MOTORISTA_SAIDA, MOTORISTA_RETORNO, CARREGAMENTO,
+  DESCARGA}` (preenchido pelo app do motorista, mesmo padrão de D039) — não modelado nesta fundação
+  (o preenchimento aqui é sempre síncrono via API; sincronização offline é escopo de `mobile`).

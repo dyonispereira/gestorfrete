@@ -158,6 +158,31 @@ arquivo for escrito — mesmo cuidado já tomado com `tracking` em `003-frota.md
 |---|---|---|---|
 | CONFIGURACAO_TENANT.ALCADA_APROVACAO_MANUTENCAO | Alçada de aprovação de manutenção | Monetário | Moeda: BRL (D075). Dono: `settings`. A ser detalhado em `010-administracao.md` |
 
+## 6. Checklist
+
+Dono: `maintenance` · Natureza: Transactional Data · Aggregate Root. Formalizado depois deste
+dicionário já escrito (ver nota de reconciliação em `../../domain/004-manutencao.md`) — item de
+verificação armazenado inline (JSONB), não como entidade própria, já que não existe um "Modelo de
+Checklist" configurável nesta fundação (ver "O que não faz" no domain doc).
+
+| Atributo | Nome | Tipo Conceitual | Fase | Obrigatório | Origem | Histórico | Classificação | Observações |
+|---|---|---|---|---|---|---|---|---|
+| CHECKLIST.TIPO | Tipo | Enum | Criação | Sim | Informado | Não | Interno | Valores: `MotoristaSaida`/`MotoristaRetorno`/`Oficina`/`Administrativo`/`Carregamento`/`Descarga` — atributo independente do status, mesma máquina para todos (`007-CHECKLIST.md`) |
+| CHECKLIST.TIPO_REFERENCIA | Tipo da referência | Enum | Criação | Sim | Informado | Não | Interno | Valores: `Viagem`/`OrdemServico` — referência polimórfica, mesmo padrão de Anexo/Comentário (D024/D023) |
+| CHECKLIST.REFERENCIA_ID | Referência | Referência | Criação | Sim | Informado | Não | Interno | FK lógica (sem constraint de banco, por ser polimórfica) para Viagem ou Ordem de Serviço |
+| CHECKLIST.VEICULO_TRACIONADOR_ID | Veículo | Referência | Criação | Sim | Capturado (sistema, da alocação vigente da Viagem) | Não | Interno | Snapshot — não ressincroniza (D038) |
+| CHECKLIST.MOTORISTA_ID | Motorista | Referência | Criação | Não | Capturado (sistema, da alocação vigente da Viagem) | Não | Interno | Snapshot — não ressincroniza (D038). Nulo para `TIPO = Oficina`/`Administrativo` |
+| CHECKLIST.ITENS | Itens de verificação | JSON | Preenchimento | Sim | Informado | Sim, congela em `Concluído` | Interno | `[{descricao, critico, resposta}]` — sem Modelo de Checklist configurável nesta fundação (ver domain doc) |
+| CHECKLIST.STATUS | Status | Enum | Todas | Sim | Calculado (transições da máquina de estados) | Sim, em `ChecklistStatusHistory` (D017/D018) | Interno | Valores completos e transições: `007-CHECKLIST.md`. **Atributo Crítico (D077)** — ver Governança abaixo |
+| CHECKLIST.CHECKLIST_REPROVADO_ID | Checklist reprovado (origem) | Referência | — | Não | Capturado (sistema, na criação por reprovação) | Não | Interno | FK para o Checklist `Reprovado` que gerou este novo registro — nunca aponta para um `Pendente`/`Aprovado` |
+| CHECKLIST.CODIGO | Código funcional | Texto Curto | — (universal, D069) | Sim | Capturado (sistema) | Não | Interno | Mesmo reforço de D084: mesmo um Checklist `Reprovado`, seu código nunca é reaproveitado |
+
+### Governança do atributo crítico `STATUS` (D077)
+
+| Quem altera? | Quando muda? | Quem pode visualizar? | Quem nunca altera? |
+|---|---|---|---|
+| Motorista/Mecânico/Analista de Frota (`Pendente`→`Em Preenchimento`→`Concluído`, conforme `TIPO`); avaliador automático do sistema (`Concluído`→`Aprovado`/`Reprovado`, com base nos itens críticos — ver `007-CHECKLIST.md`) | A cada transição válida da máquina de estados | Conforme RBAC; Auditor sempre em modo leitura (`maintenance.checklist.view_history`) | Frontend sozinho (D027); `freight`/`maintenance` (Ordem de Serviço) só leem o evento `ChecklistAprovado`/`ChecklistReprovado`, nunca escrevem o status do Checklist |
+
 ## Como este documento cresce
 
 Mesmo princípio de todo o dicionário: um arquivo `NNN-categoria.md` por vez, na ordem do roadmap

@@ -3,6 +3,7 @@ import {
   Banknote,
   Bot,
   Building2,
+  ClipboardCheck,
   ClipboardList,
   Container,
   FileStack,
@@ -170,6 +171,15 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "maintenance",
     label: "Manutenção",
     items: [
+      {
+        id: "checklists",
+        label: "Checklists",
+        href: "/checklists",
+        icon: ClipboardCheck,
+        requiredPermissions: ["maintenance.checklist.view"],
+        description: "Verificações de saída/retorno de motorista, oficina e outras.",
+        implemented: true,
+      },
       {
         id: "work-orders",
         label: "Ordens de Serviço",

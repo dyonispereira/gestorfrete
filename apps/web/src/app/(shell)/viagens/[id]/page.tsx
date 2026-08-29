@@ -7,6 +7,7 @@ import { Card, CardDescription, CardHeader, CardTitle, Tabs, TabsContent, TabsLi
 import { usePermissions } from "@/core/rbac/permissions-provider";
 import { useTripQuery } from "@/modules/freight/hooks/use-trips";
 import { AllocationPanel } from "@/modules/freight/components/allocation-panel";
+import { ChecklistPanel } from "@/modules/maintenance/components/checklist-panel";
 import { DeliveriesTab } from "@/modules/freight/components/deliveries-tab";
 import { OccurrencesTab } from "@/modules/freight/components/occurrences-tab";
 import { TripAttachmentsPanel } from "@/modules/freight/components/trip-attachments-panel";
@@ -56,6 +57,7 @@ export default function TripDetailPage() {
         <TabsList>
           <TabsTrigger value="visao-geral">Visão Geral</TabsTrigger>
           <TabsTrigger value="recursos">Recursos</TabsTrigger>
+          <TabsTrigger value="checklist">Checklist</TabsTrigger>
           <TabsTrigger value="entregas">Entregas</TabsTrigger>
           <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>
           <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
@@ -84,6 +86,15 @@ export default function TripDetailPage() {
             tripId={tripId}
             canAllocate={hasPermission("freight.trip.edit")}
             canReassign={hasPermission("freight.trip.reassign")}
+          />
+        </TabsContent>
+
+        <TabsContent value="checklist">
+          <ChecklistPanel
+            tripId={tripId}
+            canFill={hasPermission("maintenance.checklist.fill")}
+            canApprove={hasPermission("maintenance.checklist.approve")}
+            canReject={hasPermission("maintenance.checklist.reject")}
           />
         </TabsContent>
 

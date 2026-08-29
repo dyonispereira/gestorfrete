@@ -1,7 +1,8 @@
 # 005 — Manutenção
 
-Traduz para SQL as 8 entidades de
-[`../dictionary/004-manutencao.md`](../dictionary/004-manutencao.md). As 8 regras de
+Traduz para SQL as 9 entidades de
+[`../dictionary/004-manutencao.md`](../dictionary/004-manutencao.md) (`Checklist` adicionada depois
+deste arquivo já escrito — ver Reconciliações abaixo). As 8 regras de
 [`../README.md`](../README.md) já se aplicam a toda tabela.
 
 ## Reconciliações antes de desenhar (D076)
@@ -11,7 +12,7 @@ Traduz para SQL as 8 entidades de
 | Fornecedores Executores | Não é entidade nova — `fornecedores` (Lote 3, `002-cadastros.md`) já é genérica por design (`tipo_principal` inclui Oficina/Recapagem/Seguro/Outro); `ordens_servico.fornecedor_executor_id` referencia essa mesma tabela |
 | Agenda Preventiva | Não é entidade nova — é uma consulta (mesmo princípio de D187, Timeline Universal) que cruza `planos_manutencao_preventiva` com a última `leituras_hodometro`/`leituras_telemetria` de cada veículo para calcular a próxima data/km prevista; nenhuma tabela armazena "a agenda" pronta |
 | Histórico de Execução | Implementação física de `OrdemServicoStatusHistory` (D017/D018, já citado em `003-MANUTENCAO.md`) — tabela `ordens_servico_status_history` |
-| Checklist de Execução | **Não modelado neste lote.** Checklist é referenciado por eventos já catalogados (`ChecklistReprovado`, consumido por Ordem de Serviço) e por um fluxo ainda não escrito (`007-CHECKLIST.md`), mas **nunca foi formalizado como entidade em nenhuma das 175 entidades do Modelo de Domínio**. Criar a tabela agora violaria D101/D102 (Domain é a única fonte de entidades, nunca a camada física). `ordens_servico.origem_abertura` já reserva o valor `CHECKLIST_REPROVADO` para quando essa entidade existir — nenhuma migração de schema será necessária depois, só a criação da tabela e da FK |
+| Checklist de Execução | **Modelado agora** (reconciliação, ver `../../domain/004-manutencao.md`) — estava bloqueado por D101/D102 (Domain é a única fonte de entidades) até a entidade `Checklist` ser formalizada no Modelo de Domínio, o que foi feito para desbloquear `AGUARDANDO_CHECKLIST → LIBERADA` em `freight` (gap identificado nos Lotes Operação/Documentos Fiscais). `ordens_servico.origem_abertura` já reservava o valor `CHECKLIST_REPROVADO` desde a rodada anterior — nenhuma migração adicional em `ordens_servico` é necessária, só a FK lógica (sem constraint física, referência polimórfica) |
 
 ---
 
@@ -258,6 +259,59 @@ consulta faz `JOIN` com `veiculos_tracionadores`; se um snapshot histórico for 
 (`004-manutencao.md`) não define um snapshot para Ordem de Serviço; criar um agora seria inventar
 estrutura fora da origem (D101/D102).
 
+## `checklists` e `checklists_status_history`
+
+Sem "Modelo de Checklist" configurável nesta fundação (ver domain doc, "O que não faz") — `itens`
+guarda a resposta inline em JSONB, mesmo princípio de `entregas.endereco_entrega` (`003-operacao.md`)
+para dado estruturado que não precisa de tabela própria ainda. `referencia_tipo`/`referencia_id` é
+referência polimórfica (mesmo padrão de `anexos`/`comentarios`, `003-operacao.md`) — sem FK física,
+já que aponta ora para `viagens`, ora (futuramente) para `ordens_servico`.
+
+```sql
+CREATE TYPE checklists_tipo_enum AS ENUM (
+    'MOTORISTA_SAIDA', 'MOTORISTA_RETORNO', 'OFICINA', 'ADMINISTRATIVO', 'CARREGAMENTO', 'DESCARGA'
+);
+CREATE TYPE checklists_referencia_tipo_enum AS ENUM ('VIAGEM', 'ORDEM_SERVICO');
+CREATE TYPE checklists_status_enum AS ENUM (
+    'PENDENTE', 'EM_PREENCHIMENTO', 'CONCLUIDO', 'APROVADO', 'REPROVADO'
+);
+
+CREATE TABLE checklists (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id                   UUID NOT NULL REFERENCES tenants(id),
+    codigo                      TEXT NOT NULL,
+    tipo                        checklists_tipo_enum NOT NULL,
+    referencia_tipo             checklists_referencia_tipo_enum NOT NULL,
+    referencia_id               UUID NOT NULL,   -- polimórfico, sem FK de banco (mesmo padrão de anexos/comentarios)
+    veiculo_tracionador_id      UUID NOT NULL REFERENCES veiculos_tracionadores(id),
+    motorista_id                UUID REFERENCES motoristas(id),   -- nulo para OFICINA/ADMINISTRATIVO
+    itens                       JSONB NOT NULL DEFAULT '[]',   -- [{descricao, critico, resposta}]
+    status                      checklists_status_enum NOT NULL DEFAULT 'PENDENTE',
+    checklist_reprovado_id      UUID REFERENCES checklists(id),   -- origem, quando criado por reprovação
+    criado_em                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    atualizado_em                TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_checklists_tenant_id_codigo UNIQUE (tenant_id, codigo)
+);
+
+CREATE INDEX idx_checklists_tenant_id_referencia ON checklists (tenant_id, referencia_tipo, referencia_id);
+CREATE INDEX idx_checklists_tenant_id_status ON checklists (tenant_id, status);
+
+CREATE TABLE checklists_status_history (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),   -- D174/D193
+    checklist_id    UUID NOT NULL REFERENCES checklists(id),
+    status          TEXT NOT NULL,
+    usuario_id      UUID,
+    origem          TEXT NOT NULL,   -- 'sistema' (avaliação automática) / usuário (preenchimento manual)
+    observacao      TEXT,   -- obrigatória (aplicação) em REPROVADO
+    data_hora       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_checklists_status_history_tenant_id ON checklists_status_history (tenant_id);
+CREATE INDEX idx_checklists_status_history_checklist_id ON checklists_status_history (checklist_id);
+```
+
 ## Constraints de integridade — resumo
 
 | Regra de negócio | Constraint física |
@@ -278,4 +332,5 @@ extensível (D120-style); nenhum gatilho novo exigirá `ALTER TABLE`.
 
 ## Como este arquivo cresce
 
-Concluído para o escopo deste lote. Próximo: `006-financeiro.md`.
+Concluído para o escopo original deste lote; `checklists`/`checklists_status_history` adicionadas
+numa reconciliação posterior (ver nota no topo). Próximo: `006-financeiro.md`.

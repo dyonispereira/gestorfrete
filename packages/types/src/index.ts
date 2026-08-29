@@ -986,3 +986,52 @@ export interface FiscalEvent {
   result?: FiscalEventResult;
   origin: string;
 }
+
+/* ── Manutenção — Checklist (desbloqueia Trip.AGUARDANDO_CHECKLIST → LIBERADA) ──
+ * Sprint 15, Lote Frota e Manutenção (Parte 1). Formalizada como entidade só nesta Lote — não
+ * existia no Modelo de Domínio até agora (ver `docs/domain/004-manutencao.md`). Sem "Modelo de
+ * Checklist" configurável: `items` é armazenado inline, sem template/versionamento próprios.
+ * `POST /checklists` é o gatilho de `PLANEJADA→AGUARDANDO_CHECKLIST` (não o preenchimento), e
+ * `commands/approve` é o gatilho real de `AGUARDANDO_CHECKLIST→LIBERADA` — os dois já existiam
+ * como métodos internos em `freight.TripInternalTransitions` (D376), só nunca tinham sido
+ * chamados. Um `Aprovado`/`Reprovado` nunca é reaberto; reprovar sempre cria um novo checklist
+ * `Pendente` referenciando o reprovado. `Referencia_tipo=ORDEM_SERVICO` já existe no vocabulário
+ * mas não tem suporte no Backend ainda (Ordem de Serviço é a Parte 2 desta Lote). */
+
+export type ChecklistType = "MOTORISTA_SAIDA" | "MOTORISTA_RETORNO" | "OFICINA" | "ADMINISTRATIVO" | "CARREGAMENTO" | "DESCARGA";
+export type ChecklistReferenceType = "VIAGEM" | "ORDEM_SERVICO";
+export type ChecklistStatus = "PENDENTE" | "EM_PREENCHIMENTO" | "CONCLUIDO" | "APROVADO" | "REPROVADO";
+
+export interface ChecklistItem {
+  descricao: string;
+  critico: boolean;
+  resposta?: boolean;
+}
+
+export interface Checklist {
+  id: UUID;
+  codigo: string;
+  type: ChecklistType;
+  reference_type: ChecklistReferenceType;
+  reference_id: UUID;
+  tractor_unit_id: UUID;
+  driver_id?: UUID;
+  items: ChecklistItem[];
+  status: ChecklistStatus;
+  rejected_checklist_id?: UUID;
+  audit: AuditMetadata;
+}
+
+export interface CreateChecklistRequest {
+  type: ChecklistType;
+  reference_type: ChecklistReferenceType;
+  reference_id: UUID;
+}
+
+export interface SubmitChecklistRequest {
+  itens: ChecklistItem[];
+}
+
+export interface RejectChecklistRequest {
+  observacao: string;
+}

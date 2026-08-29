@@ -72,6 +72,7 @@ escrita) a cada arquivo concluído, nunca fica desatualizado.
 - Plano de Manutenção Preventiva
 - Tipo de Serviço
 - Aprovação de Custo
+- Checklist
 
 ## 005 — Pneus
 

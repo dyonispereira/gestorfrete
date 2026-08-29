@@ -32,7 +32,7 @@ usado por dezenas de entidades ao mesmo tempo.
 | 001 | [Cadastros](./001-cadastros.md) | 18 (16 + Endereço/Documento do Motorista, D182/D183) | Concluído |
 | 002 | [Operação](./002-operacao.md) | 14 | Concluído |
 | 003 | [Frota](./003-frota.md) | 10 | Concluído |
-| 004 | [Manutenção](./004-manutencao.md) | 8 | Concluído |
+| 004 | [Manutenção](./004-manutencao.md) | 9 (reconciliado de 8 — ver nota em `004-manutencao.md`) | Concluído |
 | 005 | [Pneus](./005-pneus.md) | 5 | Concluído |
 | 006 | [Financeiro](./006-financeiro.md) | 11 (+ Centro de Custo, já em `001-cadastros.md`) | Concluído |
 | 007 | [Fiscal](./007-fiscal.md) | 7 | Concluído |

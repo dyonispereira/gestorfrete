@@ -46,6 +46,7 @@ from modules.identity_access.interfaces.api.user_router import router as user_ro
 from modules.integration.interfaces.api.integration_config_router import router as integration_config_router
 from modules.integration.interfaces.api.job_router import router as job_router
 from modules.integration.interfaces.api.webhook_router import router as webhook_router
+from modules.maintenance.interfaces.api.checklist_router import router as checklist_router
 from modules.maintenance.interfaces.api.supplier_router import router as supplier_router
 from modules.mobile.interfaces.api.driver_auth_router import router as driver_auth_router
 from modules.mobile.interfaces.api.driver_delivery_router import router as driver_delivery_router
@@ -207,3 +208,9 @@ api_router_v1.include_router(ai_classification_router)
 api_router_v1.include_router(ai_anomaly_router)
 api_router_v1.include_router(computer_vision_reading_router)
 api_router_v1.include_router(ai_feedback_router)
+
+# Sprint 15 — Manutenção/Checklist (`domain/004-manutencao.md` reconciliação, D101/D102).
+# `checklist_router` chama `freight.TripInternalTransitions.await_checklist`/`.approve_checklist`
+# (já existentes, D376) para fechar `AGUARDANDO_CHECKLIST→LIBERADA` de verdade — nenhuma alteração
+# em `freight`. Prefixo próprio (`/checklists/*`), nenhuma colisão possível com lote anterior.
+api_router_v1.include_router(checklist_router)
