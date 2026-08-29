@@ -1,0 +1,11 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class OrdemServicoOrigemAbertura(StrEnum):
+    MANUAL = "MANUAL"
+    MANUTENCAO_PREVENTIVA_SUGERIDA = "MANUTENCAO_PREVENTIVA_SUGERIDA"
+    VIAGEM_INTERROMPIDA = "VIAGEM_INTERROMPIDA"
+    CHECKLIST_REPROVADO = "CHECKLIST_REPROVADO"
+    SUGESTAO_IA = "SUGESTAO_IA"

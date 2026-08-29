@@ -20,7 +20,7 @@ import {
   Textarea,
   toast,
 } from "@gestorfrete/ui";
-import type { Checklist, ChecklistItem, ChecklistType } from "@gestorfrete/types";
+import type { Checklist, ChecklistItem, ChecklistReferenceType, ChecklistType } from "@gestorfrete/types";
 
 import {
   useApproveChecklistMutation,
@@ -48,21 +48,24 @@ const TYPE_LABEL: Record<ChecklistType, string> = {
 };
 
 interface ChecklistPanelProps {
-  tripId: string;
+  referenceType: ChecklistReferenceType;
+  referenceId: string;
   canFill: boolean;
   canApprove: boolean;
   canReject: boolean;
 }
 
 /**
- * Checklist "Motorista — Saída" desta Viagem é o que desbloqueia `PLANEJADA→AGUARDANDO_CHECKLIST→
+ * Checklist "Motorista — Saída" de uma Viagem é o que desbloqueia `PLANEJADA→AGUARDANDO_CHECKLIST→
  * LIBERADA` de verdade (Lote Frota e Manutenção, Parte 1 — fecha o gap identificado nas Lotes
  * Operação/Documentos Fiscais). Criar já dispara o primeiro passo; aprovar dispara o segundo — sem
- * nenhum SQL seed. Um Checklist Reprovado nunca é reaberto — a lista mostra o histórico completo,
- * mais recente primeiro, e o novo Pendente criado pela reprovação aparece como um registro à parte.
+ * nenhum SQL seed. Checklist "Oficina" de uma Ordem de Serviço reprovado abre automaticamente uma
+ * OS corretiva (Parte 2, mesmo bounded context) — sem chamada a `freight`. Um Checklist Reprovado
+ * nunca é reaberto — a lista mostra o histórico completo, mais recente primeiro, e o novo Pendente
+ * criado pela reprovação aparece como um registro à parte.
  */
-export function ChecklistPanel({ tripId, canFill, canApprove, canReject }: ChecklistPanelProps) {
-  const checklistsQuery = useChecklistsQuery({ reference_type: "VIAGEM", reference_id: tripId, limit: 50 });
+export function ChecklistPanel({ referenceType, referenceId, canFill, canApprove, canReject }: ChecklistPanelProps) {
+  const checklistsQuery = useChecklistsQuery({ reference_type: referenceType, reference_id: referenceId, limit: 50 });
   const createChecklist = useCreateChecklistMutation();
   const startChecklist = useStartChecklistMutation();
   const submitChecklist = useSubmitChecklistMutation();
@@ -70,7 +73,7 @@ export function ChecklistPanel({ tripId, canFill, canApprove, canReject }: Check
   const rejectChecklist = useRejectChecklistMutation();
 
   const [createOpen, setCreateOpen] = React.useState(false);
-  const [type, setType] = React.useState<ChecklistType>("MOTORISTA_SAIDA");
+  const [type, setType] = React.useState<ChecklistType>(referenceType === "VIAGEM" ? "MOTORISTA_SAIDA" : "OFICINA");
   const [items, setItems] = React.useState<Record<string, ChecklistItem[]>>({});
   const [rejectTarget, setRejectTarget] = React.useState<Checklist | null>(null);
   const [rejectObservacao, setRejectObservacao] = React.useState("");
@@ -80,7 +83,7 @@ export function ChecklistPanel({ tripId, canFill, canApprove, canReject }: Check
     event.preventDefault();
     setFormError(null);
     try {
-      await createChecklist.mutateAsync({ type, reference_type: "VIAGEM", reference_id: tripId });
+      await createChecklist.mutateAsync({ type, reference_type: referenceType, reference_id: referenceId });
       toast.success("Checklist criado.");
       setCreateOpen(false);
     } catch (error) {
@@ -225,7 +228,9 @@ export function ChecklistPanel({ tripId, canFill, canApprove, canReject }: Check
           <SheetHeader>
             <SheetTitle>Novo checklist</SheetTitle>
             <SheetDescription>
-              &ldquo;Motorista — Saída&rdquo; é o que libera o despacho da viagem quando aprovado.
+              {referenceType === "VIAGEM"
+                ? "“Motorista — Saída” é o que libera o despacho da viagem quando aprovado."
+                : "“Oficina” reprovado abre automaticamente uma nova Ordem de Serviço corretiva."}
             </SheetDescription>
           </SheetHeader>
           <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-4">

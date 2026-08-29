@@ -1,0 +1,14 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class OrdemServicoStatus(StrEnum):
+    ABERTA = "ABERTA"
+    EM_DIAGNOSTICO = "EM_DIAGNOSTICO"
+    AGUARDANDO_APROVACAO = "AGUARDANDO_APROVACAO"
+    AGUARDANDO_PECA = "AGUARDANDO_PECA"
+    EM_EXECUCAO = "EM_EXECUCAO"
+    CONCLUIDA = "CONCLUIDA"
+    FECHADA = "FECHADA"
+    CANCELADA = "CANCELADA"

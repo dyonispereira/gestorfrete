@@ -183,10 +183,11 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "work-orders",
         label: "Ordens de Serviço",
-        href: "/m/work-orders",
+        href: "/ordens-servico",
         icon: Wrench,
         requiredPermissions: ["maintenance.work_order.view"],
         description: "Ordens de serviço de manutenção.",
+        implemented: true,
       },
     ],
   },

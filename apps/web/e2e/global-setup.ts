@@ -11,7 +11,15 @@ const DB_NAME = process.env.E2E_POSTGRES_DB ?? "gestorfrete";
  * fixtures a fresh tenant + its first Users/Papéis need can only be seeded directly against
  * Postgres, via the same `docker exec ... psql` mechanism validated by hand earlier this session.
  */
-const FIXTURE_FILES = ["seed.sql", "cadastros-seed.sql", "frota-seed.sql", "viagens-seed.sql", "fiscal-seed.sql", "checklist-seed.sql"];
+const FIXTURE_FILES = [
+  "seed.sql",
+  "cadastros-seed.sql",
+  "frota-seed.sql",
+  "viagens-seed.sql",
+  "fiscal-seed.sql",
+  "checklist-seed.sql",
+  "work-orders-seed.sql",
+];
 
 export default function globalSetup(): void {
   for (const file of FIXTURE_FILES) {

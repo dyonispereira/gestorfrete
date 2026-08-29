@@ -48,6 +48,7 @@ from modules.integration.interfaces.api.job_router import router as job_router
 from modules.integration.interfaces.api.webhook_router import router as webhook_router
 from modules.maintenance.interfaces.api.checklist_router import router as checklist_router
 from modules.maintenance.interfaces.api.supplier_router import router as supplier_router
+from modules.maintenance.interfaces.api.work_order_router import router as work_order_router
 from modules.mobile.interfaces.api.driver_auth_router import router as driver_auth_router
 from modules.mobile.interfaces.api.driver_delivery_router import router as driver_delivery_router
 from modules.mobile.interfaces.api.driver_device_router import router as driver_device_router
@@ -214,3 +215,9 @@ api_router_v1.include_router(ai_feedback_router)
 # (já existentes, D376) para fechar `AGUARDANDO_CHECKLIST→LIBERADA` de verdade — nenhuma alteração
 # em `freight`. Prefixo próprio (`/checklists/*`), nenhuma colisão possível com lote anterior.
 api_router_v1.include_router(checklist_router)
+
+# Sprint 15, Parte 2 — Manutenção/Ordens de Serviço (`003-MANUTENCAO.md`). DDL já congelada em
+# `relational/005-manutencao.md` antes desta Lote — só o núcleo (OS/Item/Aprovação de Custo) é
+# implementado aqui; Estoque/Solicitação de Peça/Plano Preventivo ficam para depois. Prefixo
+# próprio (`/ordens-servico/*`), nenhuma colisão possível com lote anterior.
+api_router_v1.include_router(work_order_router)

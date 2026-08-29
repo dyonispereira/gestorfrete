@@ -1,0 +1,17 @@
+-- Mirrors work-orders-seed.sql's delete block.
+BEGIN;
+DELETE FROM sessoes_acesso WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM usuarios_papeis WHERE usuario_id = '05de0000-0000-0000-0000-000000001a01';
+DELETE FROM papel_permissao WHERE papel_id = '05de0000-0000-0000-0000-0000000000a1';
+DELETE FROM checklists_status_history WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM checklists WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM aprovacoes_custo WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM itens_ordem_servico WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM ordens_servico_status_history WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM ordens_servico WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM veiculos_tracionadores WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM usuarios WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM papeis WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM categorias_veiculo WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM tenants WHERE id = '05de0000-0000-0000-0000-000000000001';
+COMMIT;

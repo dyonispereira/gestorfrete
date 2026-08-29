@@ -23,6 +23,9 @@ from modules.maintenance.infrastructure.persistence.repositories.sqlalchemy_chec
 from modules.maintenance.infrastructure.persistence.repositories.sqlalchemy_checklist_status_history_repository import (
     SqlAlchemyChecklistStatusHistoryRepository,
 )
+from modules.maintenance.infrastructure.persistence.repositories.sqlalchemy_ordem_servico_repository import (
+    SqlAlchemyOrdemServicoRepository,
+)
 from shared_kernel.application.command import Command, CommandHandler
 from shared_kernel.domain.actor import AuthenticatedActor
 
@@ -36,12 +39,13 @@ class CreateChecklistCommand(Command):
 
 
 class CreateChecklistHandler(CommandHandler[CreateChecklistCommand, ChecklistDTO]):
-    """Nasce `PENDENTE`. Veículo/Motorista são snapshot da alocação vigente da Viagem no momento da
-    criação (D038-style, não ressincronizam). Quando `TIPO=MOTORISTA_SAIDA` e `REFERENCIA_TIPO=
-    VIAGEM`, é esta criação — não o preenchimento — que dispara `PLANEJADA→AGUARDANDO_CHECKLIST`
-    (`007-CHECKLIST.md`: a Viagem "entra em aguardando checklist" ao Checklist existir, não ao ser
-    aprovado). Chama o método `TripInternalTransitions.await_checklist` já existente em `freight`
-    (D376) — sem alterar nada em `freight`."""
+    """Nasce `PENDENTE`. Veículo/Motorista são snapshot da alocação vigente da referência no
+    momento da criação (D038-style, não ressincronizam) — de uma Viagem (via alocação de recursos)
+    ou de uma Ordem de Serviço (via `veiculo_tracionador_id` direto, sem motorista). Quando
+    `TIPO=MOTORISTA_SAIDA` e `REFERENCIA_TIPO=VIAGEM`, é esta criação — não o preenchimento — que
+    dispara `PLANEJADA→AGUARDANDO_CHECKLIST` (`007-CHECKLIST.md`). Chama o método
+    `TripInternalTransitions.await_checklist` já existente em `freight` (D376) — sem alterar nada
+    em `freight`."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -50,36 +54,39 @@ class CreateChecklistHandler(CommandHandler[CreateChecklistCommand, ChecklistDTO
         tipo = ChecklistType(command.tipo)
         referencia_tipo = ChecklistReferenciaTipo(command.referencia_tipo)
 
-        if referencia_tipo is not ChecklistReferenciaTipo.VIAGEM:
-            # Ordem de Serviço ainda não existe no Backend (Parte 2 desta Lote) — só Viagem é
-            # aceita hoje, apesar do enum já modelar as duas (D101/D102-style: o vocabulário existe,
-            # a implementação chega quando a entidade referenciada existir).
-            raise DomainError(
-                "MAINTENANCE_CHECKLIST_REFERENCIA_NOT_SUPPORTED",
-                "Checklist para Ordem de Serviço ainda não é suportado.",
-            )
-
         now = datetime.now(timezone.utc)
         should_await_checklist = False
 
         async with SQLAlchemyUnitOfWork() as uow:
-            trip_repo = SqlAlchemyTripRepository(uow.session)
-            trip = await trip_repo.get_by_id(command.referencia_id)
-            if trip is None:
-                raise NotFoundError("FREIGHT_TRIP_NOT_FOUND", "Viagem não encontrada.")
-            if trip.veiculo_tracionador_id is None:
-                raise DomainError(
-                    "MAINTENANCE_CHECKLIST_TRIP_NOT_ALLOCATED",
-                    "Viagem ainda não tem alocação de recursos — aloque motorista e veículo antes de criar o checklist.",
-                )
-            should_await_checklist = tipo is ChecklistType.MOTORISTA_SAIDA and trip.status_operacional is TripOperationalStatus.PLANEJADA
-
             checklist_repo = SqlAlchemyChecklistRepository(uow.session)
             history_repo = SqlAlchemyChecklistStatusHistoryRepository(uow.session)
 
+            if referencia_tipo is ChecklistReferenciaTipo.VIAGEM:
+                trip_repo = SqlAlchemyTripRepository(uow.session)
+                trip = await trip_repo.get_by_id(command.referencia_id)
+                if trip is None:
+                    raise NotFoundError("FREIGHT_TRIP_NOT_FOUND", "Viagem não encontrada.")
+                if trip.veiculo_tracionador_id is None:
+                    raise DomainError(
+                        "MAINTENANCE_CHECKLIST_TRIP_NOT_ALLOCATED",
+                        "Viagem ainda não tem alocação de recursos — aloque motorista e veículo antes de criar o checklist.",
+                    )
+                should_await_checklist = (
+                    tipo is ChecklistType.MOTORISTA_SAIDA and trip.status_operacional is TripOperationalStatus.PLANEJADA
+                )
+                veiculo_tracionador_id = trip.veiculo_tracionador_id
+                motorista_id = trip.motorista_id
+            else:
+                os_repo = SqlAlchemyOrdemServicoRepository(uow.session)
+                ordem_servico = await os_repo.get_by_id(command.referencia_id)
+                if ordem_servico is None:
+                    raise NotFoundError("MAINTENANCE_WORK_ORDER_NOT_FOUND", "Ordem de Serviço não encontrada.")
+                veiculo_tracionador_id = ordem_servico.veiculo_tracionador_id
+                motorista_id = None
+
             checklist = Checklist.create(
                 tipo=tipo, referencia_tipo=referencia_tipo, referencia_id=command.referencia_id,
-                veiculo_tracionador_id=trip.veiculo_tracionador_id, motorista_id=trip.motorista_id, now=now,
+                veiculo_tracionador_id=veiculo_tracionador_id, motorista_id=motorista_id, now=now,
             )
             await checklist_repo.add(checklist)
             await history_repo.add(

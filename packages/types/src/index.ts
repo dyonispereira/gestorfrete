@@ -1035,3 +1035,100 @@ export interface SubmitChecklistRequest {
 export interface RejectChecklistRequest {
   observacao: string;
 }
+
+/* ── Manutenção — Ordem de Serviço (núcleo: OS/Item/Aprovação de Custo) ──
+ * Sprint 15, Lote Frota e Manutenção, Parte 2. DDL já estava congelada em `docs/database/
+ * relational/005-manutencao.md` antes desta Lote — só o núcleo (`maintenance.work_order.*`/
+ * `.work_order_item.*`/`.cost_approval.*`) é implementado agora; Estoque/Solicitação de Peça/
+ * Plano Preventivo ficam para depois (RBAC groups próprios, deliberadamente fora de escopo).
+ * `AGUARDANDO_PECA` existe no enum mas não é alcançável ainda — depende do subsistema de peças.
+ * `necessita_aprovacao` é informado explicitamente no diagnóstico (a alçada configurável por
+ * tenant, em `settings`, ainda não existe). `custo_previsto`/`custo_realizado` nunca são
+ * digitados — recalculados pelo Backend a partir dos itens. */
+
+export type WorkOrderType = "PREVENTIVA" | "CORRETIVA" | "EMERGENCIAL" | "GARANTIA";
+export type WorkOrderOpeningOrigin = "MANUAL" | "MANUTENCAO_PREVENTIVA_SUGERIDA" | "VIAGEM_INTERROMPIDA" | "CHECKLIST_REPROVADO" | "SUGESTAO_IA";
+export type WorkOrderCause = "DESGASTE" | "QUEBRA" | "ACIDENTE" | "MAU_USO" | "INSPECAO" | "RECALL";
+export type WorkOrderStatus = "ABERTA" | "EM_DIAGNOSTICO" | "AGUARDANDO_APROVACAO" | "AGUARDANDO_PECA" | "EM_EXECUCAO" | "CONCLUIDA" | "FECHADA" | "CANCELADA";
+export type WorkOrderItemCostCategory = "PECAS" | "PNEUS" | "SERVICOS" | "TERCEIROS" | "MAO_DE_OBRA_INTERNA" | "MAO_DE_OBRA_TERCEIRIZADA" | "DESLOCAMENTO" | "OUTROS";
+export type CostApprovalDecision = "APROVADO" | "REJEITADO";
+
+export interface WorkOrder {
+  id: UUID;
+  codigo: string;
+  tractor_unit_id: UUID;
+  composition_id?: UUID;
+  supplier_id?: UUID;
+  type: WorkOrderType;
+  opening_origin: WorkOrderOpeningOrigin;
+  problem_description: string;
+  cause?: WorkOrderCause;
+  root_cause?: string;
+  technical_diagnosis?: string;
+  mechanic_id?: UUID;
+  predicted_cost?: string;
+  actual_cost?: string;
+  needs_approval: boolean;
+  completion_evidence_required: boolean;
+  status: WorkOrderStatus;
+  execution_started_at?: ISODateTime;
+  completed_at?: ISODateTime;
+  audit: AuditMetadata;
+}
+
+export interface CreateWorkOrderRequest {
+  tractor_unit_id: UUID;
+  type: WorkOrderType;
+  problem_description: string;
+  composition_id?: UUID;
+  supplier_id?: UUID;
+}
+
+export interface DiagnoseWorkOrderRequest {
+  technical_diagnosis?: string;
+  cause?: WorkOrderCause;
+  root_cause?: string;
+  mechanic_id?: UUID;
+  needs_approval?: boolean;
+}
+
+export interface ApproveCostRequest {
+  justification?: string;
+}
+
+export interface RejectCostRequest {
+  justification: string;
+}
+
+export interface CancelWorkOrderRequest {
+  justification: string;
+}
+
+export interface WorkOrderItem {
+  id: UUID;
+  ordem_servico_id: UUID;
+  cost_category: WorkOrderItemCostCategory;
+  description: string;
+  part_stock_id?: UUID;
+  quantity: string;
+  unit_value: string;
+  total_value: string;
+}
+
+export interface CreateWorkOrderItemRequest {
+  cost_category: WorkOrderItemCostCategory;
+  description: string;
+  quantity: string;
+  unit_value: string;
+  part_stock_id?: UUID;
+}
+
+export interface CostApproval {
+  id: UUID;
+  ordem_servico_id: UUID;
+  level: number;
+  decision: CostApprovalDecision;
+  justification?: string;
+  actor_id: UUID;
+  occurred_at: ISODateTime;
+}

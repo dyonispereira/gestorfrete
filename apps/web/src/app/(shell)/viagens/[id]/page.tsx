@@ -91,7 +91,8 @@ export default function TripDetailPage() {
 
         <TabsContent value="checklist">
           <ChecklistPanel
-            tripId={tripId}
+            referenceType="VIAGEM"
+            referenceId={tripId}
             canFill={hasPermission("maintenance.checklist.fill")}
             canApprove={hasPermission("maintenance.checklist.approve")}
             canReject={hasPermission("maintenance.checklist.reject")}
