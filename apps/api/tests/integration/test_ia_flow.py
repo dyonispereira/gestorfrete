@@ -28,7 +28,9 @@ from modules.ai.infrastructure.persistence.models.ai_prediction_model import AIP
 from modules.ai.infrastructure.persistence.models.ai_suggestion_model import AISuggestionModel
 from modules.ai.infrastructure.persistence.models.computer_vision_reading_model import ComputerVisionReadingModel
 from modules.crm.infrastructure.persistence.models.client_model import ClientModel
+from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
+from modules.fleet.infrastructure.persistence.models.vehicle_impediment_model import VehicleImpedimentModel
 from modules.fleet.infrastructure.persistence.models.vehicle_model import VehicleModel
 from modules.freight.infrastructure.persistence.models.occurrence_model import OccurrenceModel
 from modules.freight.infrastructure.persistence.models.trip_allocation_model import TripAllocationModel
@@ -206,6 +208,8 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         await session.execute(delete(TripAllocationModel).where(TripAllocationModel.tenant_id == tenant_id))
         await session.execute(delete(TripStatusHistoryModel).where(TripStatusHistoryModel.tenant_id == tenant_id))
         await session.execute(delete(TripModel).where(TripModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleModel).where(VehicleModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleCategoryModel).where(VehicleCategoryModel.tenant_id == tenant_id))
         await session.execute(delete(ClientModel).where(ClientModel.tenant_id == tenant_id))

@@ -19,6 +19,7 @@ const FIXTURE_FILES = [
   "fiscal-seed.sql",
   "checklist-seed.sql",
   "work-orders-seed.sql",
+  "availability-seed.sql",
 ];
 
 export default function globalSetup(): void {

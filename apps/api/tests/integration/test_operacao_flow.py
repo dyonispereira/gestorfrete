@@ -16,7 +16,9 @@ from modules.documents.infrastructure.persistence.models.fiscal_configuration_mo
     FiscalConfigurationModel,
 )
 from modules.drivers.infrastructure.persistence.models.driver_model import DriverModel
+from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
+from modules.fleet.infrastructure.persistence.models.vehicle_impediment_model import VehicleImpedimentModel
 from modules.fleet.infrastructure.persistence.models.vehicle_model import VehicleModel
 from modules.freight.application.trip_internal_transitions import TripInternalTransitions
 from modules.freight.domain.value_objects.trip_financial_status import TripFinancialStatus
@@ -214,6 +216,8 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         await session.execute(delete(CteModel).where(CteModel.tenant_id == tenant_id))
         await session.execute(delete(FiscalConfigurationModel).where(FiscalConfigurationModel.tenant_id == tenant_id))
         await session.execute(delete(TripModel).where(TripModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleModel).where(VehicleModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleCategoryModel).where(VehicleCategoryModel.tenant_id == tenant_id))
         await session.execute(delete(DriverModel).where(DriverModel.tenant_id == tenant_id))

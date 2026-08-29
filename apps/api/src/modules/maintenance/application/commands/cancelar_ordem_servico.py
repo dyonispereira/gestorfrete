@@ -70,7 +70,7 @@ class CancelarOrdemServicoHandler(CommandHandler[CancelarOrdemServicoCommand, Or
             await uow.commit()
 
         await VehicleAvailabilityProjector().apply_service_order_closed(
-            vehicle_id=ordem_servico.veiculo_tracionador_id, at=now
+            vehicle_id=ordem_servico.veiculo_tracionador_id, work_order_id=ordem_servico.id, at=now
         )
 
         return OrdemServicoDTO.from_entity(ordem_servico)

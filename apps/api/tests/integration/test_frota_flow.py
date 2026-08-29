@@ -15,6 +15,7 @@ from modules.fleet.application.availability_projector import VehicleAvailability
 from modules.fleet.infrastructure.persistence.models.implement_model import ImplementModel
 from modules.fleet.infrastructure.persistence.models.odometer_reading_model import OdometerReadingModel
 from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
+from modules.fleet.infrastructure.persistence.models.vehicle_impediment_model import VehicleImpedimentModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
 from modules.fleet.infrastructure.persistence.models.vehicle_composition_model import (
     VehicleCompositionModel,
@@ -187,6 +188,7 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
                 )
             )
         await session.execute(delete(VehicleCompositionModel).where(VehicleCompositionModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
         await session.execute(delete(OdometerReadingModel).where(OdometerReadingModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleDocumentModel).where(VehicleDocumentModel.tenant_id == tenant_id))
@@ -595,10 +597,11 @@ class TestVehicleAvailabilityFlow:
         post_collection = await client.post("/api/v1/veiculos/disponibilidade", headers=headers)
         assert post_collection.status_code == 405
 
-        # A única forma real de popular a projeção: o projetor de eventos, chamado diretamente
-        # aqui simulando o que um consumidor real de `ViagemDespachada` faria (freight ainda não
-        # existe no backend, AVAILABILITY_IMPLEMENTATION.md). `motorista_atual_id` tem FK real
-        # para `motoristas` — usa um Motorista real (Lote 3), não um UUID solto.
+        # A única forma real de popular a projeção: o projetor de eventos. Chamado diretamente
+        # aqui com um `trip_id` sintético — o wiring real (`freight.dispatch_trip`) é coberto por
+        # e2e (`availability.spec.ts`), este teste isola só a garantia "sem rota de escrita".
+        # `motorista_atual_id` tem FK real para `motoristas` — usa um Motorista real (Lote 3), não
+        # um UUID solto.
         driver_resp = await client.post(
             "/api/v1/drivers",
             headers=headers,
@@ -611,7 +614,7 @@ class TestVehicleAvailabilityFlow:
         token = set_current_tenant_id(tenant_id)
         try:
             await projector.apply_trip_dispatched(
-                vehicle_id=uuid.UUID(vehicle_id), driver_id=driver_id, implement_id=None,
+                vehicle_id=uuid.UUID(vehicle_id), trip_id=uuid.uuid4(), driver_id=driver_id, implement_id=None,
                 at=datetime.now(timezone.utc),
             )
         finally:

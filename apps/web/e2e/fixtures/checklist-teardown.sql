@@ -17,6 +17,10 @@ DELETE FROM ctes_status_history WHERE tenant_id = 'c4ec0000-0000-0000-0000-00000
 DELETE FROM ctes WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
 DELETE FROM configuracoes_fiscais_tenant WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
 DELETE FROM viagens WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
+-- Populadas por `VehicleAvailabilityProjector` desde que `dispatch_trip` foi conectado (Lote Frota
+-- e Manutenção, Parte 3) — o despacho desta suíte agora deixa rastro aqui, sai antes do veículo.
+DELETE FROM veiculo_impedimentos WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
+DELETE FROM disponibilidade_veiculo WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
 DELETE FROM veiculos_tracionadores WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
 DELETE FROM motoristas WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';
 DELETE FROM clientes WHERE tenant_id = 'c4ec0000-0000-0000-0000-000000000001';

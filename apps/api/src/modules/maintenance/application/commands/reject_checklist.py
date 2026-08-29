@@ -127,7 +127,7 @@ class RejectChecklistHandler(CommandHandler[RejectChecklistCommand, ChecklistDTO
 
         if corrective_work_order_id is not None:
             await VehicleAvailabilityProjector().apply_service_order_opened(
-                vehicle_id=checklist.veiculo_tracionador_id, at=now
+                vehicle_id=checklist.veiculo_tracionador_id, work_order_id=corrective_work_order_id, at=now
             )
 
         return ChecklistDTO.from_entity(checklist)

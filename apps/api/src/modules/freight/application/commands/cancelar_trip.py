@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError, ValidationError
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
@@ -30,7 +31,9 @@ class CancelarTripCommand(Command):
 class CancelarTripHandler(CommandHandler[CancelarTripCommand, TripDTO]):
     """`commands/cancelar` — `notes` obrigatória (D007); nunca alcançável direto de
     `EM_TRANSITO`/`EM_ENTREGA`/`CARREGANDO`/`EM_DESLOCAMENTO` (passa por `INTERROMPIDA` primeiro,
-    `Trip.cancelar()` já reforça isso)."""
+    `Trip.cancelar()` já reforça isso). Fecha o impedimento `VIAGEM` em `fleet` após o commit —
+    idempotente/no-op na prática mais comum, já que a maioria das viagens canceláveis nunca chegou
+    a ser despachada (`apply_trip_dispatched` nunca abriu o impedimento)."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -75,5 +78,10 @@ class CancelarTripHandler(CommandHandler[CancelarTripCommand, TripDTO]):
             )
 
             await uow.commit()
+
+        if trip.veiculo_tracionador_id is not None:
+            await VehicleAvailabilityProjector().apply_trip_ended(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, at=now
+            )
 
         return TripDTO.from_entity(trip)

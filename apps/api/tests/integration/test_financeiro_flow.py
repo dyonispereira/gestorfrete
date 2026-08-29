@@ -35,7 +35,9 @@ from modules.financial.infrastructure.persistence.models.cost_center_model impor
 from modules.financial.infrastructure.persistence.models.financial_reversal_model import FinancialReversalModel
 from modules.financial.infrastructure.persistence.models.invoice_model import InvoiceModel
 from modules.financial.infrastructure.persistence.models.payment_method_model import PaymentMethodModel
+from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
+from modules.fleet.infrastructure.persistence.models.vehicle_impediment_model import VehicleImpedimentModel
 from modules.fleet.infrastructure.persistence.models.vehicle_model import VehicleModel
 from modules.freight.application.trip_internal_transitions import TripInternalTransitions
 from modules.freight.domain.value_objects.trip_fiscal_status import TripFiscalStatus
@@ -308,6 +310,8 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         await session.execute(delete(CteModel).where(CteModel.tenant_id == tenant_id))
         await session.execute(delete(FiscalConfigurationModel).where(FiscalConfigurationModel.tenant_id == tenant_id))
         await session.execute(delete(TripModel).where(TripModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
+        await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleModel).where(VehicleModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleCategoryModel).where(VehicleCategoryModel.tenant_id == tenant_id))
         await session.execute(delete(DriverModel).where(DriverModel.tenant_id == tenant_id))

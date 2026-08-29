@@ -84,7 +84,7 @@ class CreateOrdemServicoHandler(CommandHandler[CreateOrdemServicoCommand, OrdemS
             await uow.commit()
 
         await VehicleAvailabilityProjector().apply_service_order_opened(
-            vehicle_id=ordem_servico.veiculo_tracionador_id, at=now
+            vehicle_id=ordem_servico.veiculo_tracionador_id, work_order_id=ordem_servico.id, at=now
         )
         if command.hodometro_abertura_km is not None:
             await RegisterOdometerReadingHandler().handle(

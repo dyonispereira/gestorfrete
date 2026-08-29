@@ -320,6 +320,33 @@ CREATE INDEX idx_disponibilidade_veiculo_tenant_id ON disponibilidade_veiculo (t
 Populada/atualizada exclusivamente por consumidores de evento (`ViagemDespachada`,
 `ViagemConcluida`, `OrdemServicoAberta`, etc.) — nenhuma rota de API de escrita direta nesta tabela.
 
+**Reconciliado — Lote Frota e Manutenção, Parte 3 (Availability Hardening)**: `status` deixou de
+ser sobrescrito pelo último evento recebido e passou a ser derivado de `veiculo_impedimentos`
+abaixo — um veículo com dois impedimentos concorrentes (ex. Viagem despachada + OS aberta) só volta
+a `DISPONIVEL` quando o último deles é encerrado. `disponibilidade_veiculo` em si não ganhou nenhuma
+coluna nova nesta reconciliação — só a lógica de escrita mudou.
+
+```sql
+CREATE TABLE veiculo_impedimentos (
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id                UUID NOT NULL REFERENCES tenants(id),
+    veiculo_tracionador_id   UUID NOT NULL REFERENCES veiculos_tracionadores(id),
+    tipo                     TEXT NOT NULL,   -- 'VIAGEM' | 'MANUTENCAO' — vocabulário interno, não é um novo AvailabilityStatus (D247)
+    referencia_id            UUID NOT NULL,   -- viagens.id ou ordens_servico.id, conforme `tipo` — sem FK física, referência polimórfica
+    motorista_id             UUID REFERENCES motoristas(id),
+    implemento_id            UUID REFERENCES implementos(id),
+    iniciado_em              TIMESTAMPTZ NOT NULL,
+    encerrado_em             TIMESTAMPTZ   -- NULL = impedimento ainda ativo
+);
+
+CREATE INDEX idx_veiculo_impedimentos_veiculo_ativo ON veiculo_impedimentos (veiculo_tracionador_id, encerrado_em);
+```
+
+Ledger interno — sem router/schema/permissão própria, escrito exclusivamente por
+`VehicleAvailabilityProjector` (mesmo D247 já aplicado a `disponibilidade_veiculo`). Quando mais de
+um `tipo` está ativo para o mesmo veículo, `MANUTENCAO` tem prioridade de exibição sobre `VIAGEM`
+(um veículo na oficina não está dirigível, independente do estado da viagem).
+
 ## FK de `003-operacao.md` agora resolvida
 
 `viagens.veiculo_tracionador_id`, `alocacoes_recurso_viagem.veiculo_tracionador_id`/`implemento_id`

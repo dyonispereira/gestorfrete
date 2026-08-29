@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import DomainError, NotFoundError
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.delivery_status import DeliveryStatus
@@ -36,7 +37,9 @@ class FinishTripCommand(Command):
 class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
     """`commands/finish` — pré-condição verificada aqui (Application), não pelo estado da máquina
     (D235): todas as Entregas em estado terminal, e toda Entrega `CONCLUIDA` com Canhoto
-    `REGISTRADO`."""
+    `REGISTRADO`. Fecha o impedimento `VIAGEM` em `fleet` após o commit — libera o veículo em
+    Disponibilidade só se nenhum outro impedimento (ex. uma OS aberta no mesmo veículo) continuar
+    ativo (`VehicleAvailabilityProjector.apply_trip_ended`)."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -90,5 +93,10 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
             )
 
             await uow.commit()
+
+        if trip.veiculo_tracionador_id is not None:
+            await VehicleAvailabilityProjector().apply_trip_ended(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, at=now
+            )
 
         return TripDTO.from_entity(trip)

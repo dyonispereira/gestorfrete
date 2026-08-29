@@ -299,3 +299,8 @@ Dependências proibidas, Dono da Timeline e Capacidade Offline. Ver
   (D008).
 - **Dono da Timeline**: Aggregate Veículo Tracionador.
 - **Capacidade Offline**: Consulta Offline.
+- **Reconciliado (Lote Frota e Manutenção, Parte 3)**: "Agregar sinais... em um único indicador"
+  (Responsabilidades, acima) já previa múltiplas fontes concorrentes — implementado agora via
+  `veiculo_impedimentos` (`../database/relational/004-frota.md`), um ledger interno de
+  abertura/encerramento por Viagem/OS: o indicador só volta a `Disponível` quando nenhum
+  impedimento seguir ativo, nunca ao encerrar apenas um deles.

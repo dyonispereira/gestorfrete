@@ -87,7 +87,7 @@ class ConcluirOrdemServicoHandler(CommandHandler[ConcluirOrdemServicoCommand, Or
             await uow.commit()
 
         await VehicleAvailabilityProjector().apply_service_order_closed(
-            vehicle_id=ordem_servico.veiculo_tracionador_id, at=now
+            vehicle_id=ordem_servico.veiculo_tracionador_id, work_order_id=ordem_servico.id, at=now
         )
         if command.hodometro_conclusao_km is not None:
             await RegisterOdometerReadingHandler().handle(

@@ -11,12 +11,16 @@ from modules.documents.application.commands.create_cte import CreateCteCommand, 
 from modules.drivers.infrastructure.persistence.repositories.sqlalchemy_driver_repository import (
     SqlAlchemyDriverRepository,
 )
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.fleet.infrastructure.persistence.repositories.sqlalchemy_vehicle_repository import (
     SqlAlchemyVehicleRepository,
 )
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
+from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_allocation_repository import (
+    SqlAlchemyTripAllocationRepository,
+)
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_repository import (
     SqlAlchemyTripRepository,
 )
@@ -45,7 +49,9 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
     `placa_veiculo_snapshot` são congelados pela primeira e única vez. D396 — dispara a criação
     automática do CT-e (`documents`), chamada depois que esta própria transação já commitou (mesmo
     formato "consumidor futuro de evento, síncrono" de D247/D375/D390, primeira vez na direção
-    `freight`→`documents`)."""
+    `freight`→`documents`). Mesma chamada síncrona pós-commit agora também abre o impedimento
+    `VIAGEM` em `fleet` (`VehicleAvailabilityProjector.apply_trip_dispatched`) — lado que faltava
+    do projetor de Disponibilidade, só o lado `maintenance` estava conectado até aqui."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -58,6 +64,7 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
             driver_repo = SqlAlchemyDriverRepository(uow.session)
             vehicle_repo = SqlAlchemyVehicleRepository(uow.session)
             user_repo = SqlAlchemyUserRepository(uow.session)
+            allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
 
             trip = await trip_repo.get_by_id(command.trip_id)
             if trip is None:
@@ -65,6 +72,7 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
 
             driver = await driver_repo.get_by_id(trip.motorista_id) if trip.motorista_id else None
             vehicle = await vehicle_repo.get_by_id(trip.veiculo_tracionador_id) if trip.veiculo_tracionador_id else None
+            allocation = await allocation_repo.get_current_for_trip(trip.id)
 
             trip.dispatch(
                 nome_motorista_snapshot=driver.nome if driver else "",
@@ -111,5 +119,11 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
             await uow.commit()
 
         await CreateCteHandler().handle(CreateCteCommand(actor=command.actor, trip_id=trip.id))
+
+        if trip.veiculo_tracionador_id is not None:
+            await VehicleAvailabilityProjector().apply_trip_dispatched(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, driver_id=trip.motorista_id,
+                implement_id=allocation.implemento_id if allocation is not None else None, at=now,
+            )
 
         return TripDTO.from_entity(trip)

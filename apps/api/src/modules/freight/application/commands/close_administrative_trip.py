@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError, ValidationError
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
@@ -30,7 +31,8 @@ class CloseAdministrativeTripCommand(Command):
 class CloseAdministrativeTripHandler(CommandHandler[CloseAdministrativeTripCommand, TripDTO]):
     """`commands/close-administrative` — exceção documentada (`002-VIAGEM.md`), nunca a via normal
     de `FINALIZADA`. **Nunca** força `ENCERRADA` — a convergência continua exigindo Fiscal/
-    Financeiro reais (D019)."""
+    Financeiro reais (D019). Fecha o impedimento `VIAGEM` em `fleet` após o commit, mesmo padrão de
+    `finish_trip.py`."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -77,5 +79,10 @@ class CloseAdministrativeTripHandler(CommandHandler[CloseAdministrativeTripComma
             )
 
             await uow.commit()
+
+        if trip.veiculo_tracionador_id is not None:
+            await VehicleAvailabilityProjector().apply_trip_ended(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, at=now
+            )
 
         return TripDTO.from_entity(trip)
