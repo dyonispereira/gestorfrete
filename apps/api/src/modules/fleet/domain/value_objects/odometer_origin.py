@@ -8,3 +8,4 @@ class OdometerOrigin(StrEnum):
     CHECKLIST = "CHECKLIST"
     MANUAL = "MANUAL"
     TELEMETRIA = "TELEMETRIA"
+    ORDEM_SERVICO = "ORDEM_SERVICO"

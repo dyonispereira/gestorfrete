@@ -13,6 +13,8 @@ deste arquivo já escrito — ver Reconciliações abaixo). As 8 regras de
 | Agenda Preventiva | Não é entidade nova — é uma consulta (mesmo princípio de D187, Timeline Universal) que cruza `planos_manutencao_preventiva` com a última `leituras_hodometro`/`leituras_telemetria` de cada veículo para calcular a próxima data/km prevista; nenhuma tabela armazena "a agenda" pronta |
 | Histórico de Execução | Implementação física de `OrdemServicoStatusHistory` (D017/D018, já citado em `003-MANUTENCAO.md`) — tabela `ordens_servico_status_history` |
 | Checklist de Execução | **Modelado agora** (reconciliação, ver `../../domain/004-manutencao.md`) — estava bloqueado por D101/D102 (Domain é a única fonte de entidades) até a entidade `Checklist` ser formalizada no Modelo de Domínio, o que foi feito para desbloquear `AGUARDANDO_CHECKLIST → LIBERADA` em `freight` (gap identificado nos Lotes Operação/Documentos Fiscais). `ordens_servico.origem_abertura` já reservava o valor `CHECKLIST_REPROVADO` desde a rodada anterior — nenhuma migração adicional em `ordens_servico` é necessária, só a FK lógica (sem constraint física, referência polimórfica) |
+| Hodômetro na abertura/conclusão da OS | **Reconciliado** — `ordens_servico` ganha `hodometro_abertura_km`/`hodometro_conclusao_km` (ambos opcionais — nem toda abertura/conclusão tem leitura disponível no momento). Não é um dado novo de posse da OS: cada valor informado também gera uma `leituras_hodometro` real em `fleet` com `origem = 'ORDEM_SERVICO'` (`OdometerOrigin`, D033/D034 — a OS não duplica a posse da Time Series, só denormaliza o valor pontual capturado para exibição rápida). Alimenta o futuro plano de manutenção preventiva por KM (`planos_manutencao_preventiva`, ainda não construída) |
+| Disponibilidade do veículo bloqueada por OS aberta | **Conectado agora** — `VehicleAvailabilityProjector.apply_service_order_opened`/`apply_service_order_closed` (`004-frota.md`, D247) já existiam como scaffolding desde a fundação de `fleet`, sem consumidor real porque `maintenance` não existia. `create_ordem_servico`/`concluir_ordem_servico`/`cancelar_ordem_servico` agora chamam esses métodos (mesmo padrão cross-module de D390/D398): OS `ABERTA` → veículo `EM_MANUTENCAO`; OS `CONCLUIDA` ou `CANCELADA` → veículo `DISPONIVEL` de volta. Nenhuma tabela nova, nenhuma migração em `fleet` |
 
 ---
 
@@ -109,6 +111,11 @@ CREATE TABLE ordens_servico (
     status                          ordens_servico_status_enum NOT NULL DEFAULT 'ABERTA',
     data_inicio_execucao            TIMESTAMPTZ,
     data_conclusao                  TIMESTAMPTZ,
+
+    -- Reconciliado nesta rodada (ver Reconciliações acima) — denormalização de exibição; a leitura
+    -- real e imutável vive em `leituras_hodometro` (fleet), origem = 'ORDEM_SERVICO'
+    hodometro_abertura_km           NUMERIC(10,2),
+    hodometro_conclusao_km          NUMERIC(10,2),
 
     criado_em                       TIMESTAMPTZ NOT NULL DEFAULT now(),
     criado_por                      UUID,

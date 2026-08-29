@@ -4,6 +4,7 @@ import * as React from "react";
 
 import {
   Button,
+  Input,
   Label,
   Select,
   SelectContent,
@@ -42,6 +43,7 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
   const [tractorUnitId, setTractorUnitId] = React.useState("");
   const [type, setType] = React.useState<WorkOrderType>("CORRETIVA");
   const [problemDescription, setProblemDescription] = React.useState("");
+  const [openingOdometerKm, setOpeningOdometerKm] = React.useState("");
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const vehiclesQuery = useVehiclesQuery({ limit: 100 });
@@ -51,6 +53,7 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
     setTractorUnitId("");
     setType("CORRETIVA");
     setProblemDescription("");
+    setOpeningOdometerKm("");
     setFormError(null);
   }
 
@@ -60,6 +63,7 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
     try {
       await createWorkOrder.mutateAsync({
         tractor_unit_id: tractorUnitId, type, problem_description: problemDescription,
+        opening_odometer_km: openingOdometerKm || undefined,
       });
       toast.success("Ordem de serviço criada.");
       reset();
@@ -114,6 +118,16 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
               required
               value={problemDescription}
               onChange={(event) => setProblemDescription(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-order-opening-odometer">Hodômetro na abertura (opcional)</Label>
+            <Input
+              id="work-order-opening-odometer"
+              type="number"
+              step="0.01"
+              value={openingOdometerKm}
+              onChange={(event) => setOpeningOdometerKm(event.target.value)}
             />
           </div>
 

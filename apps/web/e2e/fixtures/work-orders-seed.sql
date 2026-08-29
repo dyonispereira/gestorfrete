@@ -14,6 +14,10 @@ DELETE FROM aprovacoes_custo WHERE tenant_id = '05de0000-0000-0000-0000-00000000
 DELETE FROM itens_ordem_servico WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
 DELETE FROM ordens_servico_status_history WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
 DELETE FROM ordens_servico WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+-- Ambas populadas pelos efeitos cross-module conectados na Parte 2 (VehicleAvailabilityProjector
+-- + Leitura de Hodômetro origem=ORDEM_SERVICO) — precisam sair antes do veículo, mesma FK real.
+DELETE FROM disponibilidade_veiculo WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
+DELETE FROM leituras_hodometro WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
 DELETE FROM veiculos_tracionadores WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
 DELETE FROM usuarios WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';
 DELETE FROM papeis WHERE tenant_id = '05de0000-0000-0000-0000-000000000001';

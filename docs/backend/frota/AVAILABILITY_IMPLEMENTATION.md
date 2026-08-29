@@ -9,8 +9,9 @@ Contrato: [`../../api/025-vehicle-availability.md`](../../api/025-vehicle-availa
 
 `disponibilidade_veiculo` é populada por `ViagemDespachada`/`ViagemConcluida`/
 `ViagemInterrompida` (`freight`) e `OrdemServicoAberta`/`OrdemServicoConcluida` (`maintenance`) —
-nenhum dos dois bounded contexts existe ainda no backend (Lote 5+/Lote 6+). Não há classes
-`DomainEvent` Python para esses eventos, então não há nada real para assinar no `EventBus` ainda.
+nenhum dos dois bounded contexts existia ainda no backend na fundação deste read model (Lote 5+/
+Lote 6+). Não há classes `DomainEvent` Python para esses eventos, então não há nada real para
+assinar no `EventBus` ainda.
 
 Resolvido implementando a **projeção em si** (tabela + Repository de leitura + um serviço de
 aplicação que sabe como aplicar cada tipo de sinal) desde já, pronta para ser conectada a um
@@ -18,6 +19,15 @@ consumidor real assim que `freight`/`maintenance` existirem — só a fiação f
 subscribe(...)`) fica para quando esses eventos forem publicados de verdade. Os testes deste lote
 chamam o serviço de aplicação diretamente com os parâmetros que um evento real carregaria —
 exatamente o que um consumidor futuro faria ao receber a mensagem.
+
+**Atualização — Lote Frota e Manutenção, Parte 2**: o lado `maintenance` está conectado de verdade
+agora — `create_ordem_servico`/`concluir_ordem_servico`/`cancelar_ordem_servico` (e a abertura
+automática de OS corretiva em `reject_checklist`) chamam `apply_service_order_opened`/
+`apply_service_order_closed` diretamente após o commit da própria transação (mesmo padrão
+cross-module síncrono de D390/D398 — não é o `EventBus` ainda, é uma chamada direta
+Application→Application, já que nenhum `DomainEvent` real existe). O lado `freight`
+(`apply_trip_dispatched`/`apply_trip_ended`) segue sem consumidor real — gap documentado, não
+escondido, fora do escopo desta Lote.
 
 ## Domain/Application
 

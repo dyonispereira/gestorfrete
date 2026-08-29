@@ -29,6 +29,8 @@ class OrdemServicoDTO:
     status: str
     data_inicio_execucao: datetime | None
     data_conclusao: datetime | None
+    hodometro_abertura_km: Decimal | None
+    hodometro_conclusao_km: Decimal | None
     criado_em: datetime
     criado_por: uuid.UUID | None
     atualizado_em: datetime
@@ -47,6 +49,7 @@ class OrdemServicoDTO:
             necessita_aprovacao=entity.necessita_aprovacao,
             evidencia_conclusao_exigida=entity.evidencia_conclusao_exigida, status=entity.status.value,
             data_inicio_execucao=entity.data_inicio_execucao, data_conclusao=entity.data_conclusao,
+            hodometro_abertura_km=entity.hodometro_abertura_km, hodometro_conclusao_km=entity.hodometro_conclusao_km,
             criado_em=entity.criado_em, criado_por=entity.criado_por, atualizado_em=entity.atualizado_em,
             atualizado_por=entity.atualizado_por,
         )

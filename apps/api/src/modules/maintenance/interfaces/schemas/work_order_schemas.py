@@ -32,6 +32,8 @@ class WorkOrderResponse(BaseModel):
     status: str
     execution_started_at: datetime | None
     completed_at: datetime | None
+    opening_odometer_km: Decimal | None
+    completion_odometer_km: Decimal | None
     audit: AuditMetadataResponse
 
     @staticmethod
@@ -44,6 +46,7 @@ class WorkOrderResponse(BaseModel):
             predicted_cost=dto.custo_previsto, actual_cost=dto.custo_realizado, needs_approval=dto.necessita_aprovacao,
             completion_evidence_required=dto.evidencia_conclusao_exigida, status=dto.status,
             execution_started_at=dto.data_inicio_execucao, completed_at=dto.data_conclusao,
+            opening_odometer_km=dto.hodometro_abertura_km, completion_odometer_km=dto.hodometro_conclusao_km,
             audit=AuditMetadataResponse(
                 created_at=dto.criado_em, created_by=dto.criado_por, updated_at=dto.atualizado_em,
                 updated_by=dto.atualizado_por,
@@ -59,6 +62,7 @@ class CreateWorkOrderRequest(BaseModel):
     problem_description: str
     composition_id: uuid.UUID | None = None
     supplier_id: uuid.UUID | None = None
+    opening_odometer_km: Decimal | None = None
 
 
 class DiagnoseWorkOrderRequest(BaseModel):
@@ -87,6 +91,12 @@ class CancelWorkOrderRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     justification: str
+
+
+class ConcludeWorkOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    completion_odometer_km: Decimal | None = None
 
 
 class WorkOrderItemResponse(BaseModel):

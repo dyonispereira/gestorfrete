@@ -55,6 +55,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         status: OrdemServicoStatus,
         data_inicio_execucao: datetime | None,
         data_conclusao: datetime | None,
+        hodometro_abertura_km: Decimal | None,
+        hodometro_conclusao_km: Decimal | None,
         criado_em: datetime,
         criado_por: uuid.UUID | None,
         atualizado_em: datetime,
@@ -79,6 +81,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         self.status = status
         self.data_inicio_execucao = data_inicio_execucao
         self.data_conclusao = data_conclusao
+        self.hodometro_abertura_km = hodometro_abertura_km
+        self.hodometro_conclusao_km = hodometro_conclusao_km
         self.criado_em = criado_em
         self.criado_por = criado_por
         self.atualizado_em = atualizado_em
@@ -94,6 +98,7 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         tipo: OrdemServicoTipo,
         origem_abertura: OrdemServicoOrigemAbertura,
         descricao_problema: str,
+        hodometro_abertura_km: Decimal | None,
         criado_por: uuid.UUID | None,
         now: datetime,
     ) -> "OrdemServico":
@@ -104,7 +109,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
             tipo=tipo, origem_abertura=origem_abertura, descricao_problema=descricao_problema, causa=None,
             causa_raiz=None, diagnostico_tecnico=None, mecanico_id=None, custo_previsto=None,
             custo_realizado=None, necessita_aprovacao=False, evidencia_conclusao_exigida=False,
-            status=OrdemServicoStatus.ABERTA, data_inicio_execucao=None, data_conclusao=None, criado_em=now,
+            status=OrdemServicoStatus.ABERTA, data_inicio_execucao=None, data_conclusao=None,
+            hodometro_abertura_km=hodometro_abertura_km, hodometro_conclusao_km=None, criado_em=now,
             criado_por=criado_por, atualizado_em=now, atualizado_por=criado_por,
         )
 
@@ -147,9 +153,10 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         self._transition(OrdemServicoStatus.EM_EXECUCAO, now=now, atualizado_por=atualizado_por)
         self.data_inicio_execucao = now
 
-    def concluir(self, *, now: datetime, atualizado_por: uuid.UUID | None) -> None:
+    def concluir(self, *, hodometro_km: Decimal | None, now: datetime, atualizado_por: uuid.UUID | None) -> None:
         self._transition(OrdemServicoStatus.CONCLUIDA, now=now, atualizado_por=atualizado_por)
         self.data_conclusao = now
+        self.hodometro_conclusao_km = hodometro_km
 
     def fechar(self, *, now: datetime, atualizado_por: uuid.UUID | None) -> None:
         self._transition(OrdemServicoStatus.FECHADA, now=now, atualizado_por=atualizado_por)

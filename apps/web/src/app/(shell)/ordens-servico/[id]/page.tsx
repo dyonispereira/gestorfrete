@@ -103,6 +103,20 @@ export default function WorkOrderDetailPage() {
                   {workOrder.completed_at ? new Date(workOrder.completed_at).toLocaleString("pt-BR") : "—"}
                 </span>
               </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Hodômetro na abertura</span>
+                <span className="font-medium">
+                  {workOrder.opening_odometer_km ? `${Number(workOrder.opening_odometer_km).toLocaleString("pt-BR")} km` : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Hodômetro na conclusão</span>
+                <span className="font-medium">
+                  {workOrder.completion_odometer_km
+                    ? `${Number(workOrder.completion_odometer_km).toLocaleString("pt-BR")} km`
+                    : "—"}
+                </span>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

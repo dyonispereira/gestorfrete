@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError, ValidationError
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.maintenance.application.dtos.checklist_dto import ChecklistDTO
 from modules.maintenance.domain.entities.checklist import Checklist
 from modules.maintenance.domain.entities.checklist_status_history_entry import ChecklistStatusHistoryEntry
@@ -46,7 +47,9 @@ class RejectChecklistHandler(CommandHandler[RejectChecklistCommand, ChecklistDTO
     necessária aqui, diferente de `approve_checklist`. Quando `TIPO=OFICINA`, abre automaticamente
     uma Ordem de Serviço corretiva no mesmo veículo (`origem_abertura=CHECKLIST_REPROVADO`, valor
     já reservado no enum antes desta Ordem de Serviço existir) — mesma bounded context
-    (`maintenance`→`maintenance`), sem cruzar para `freight`."""
+    (`maintenance`→`maintenance`), sem cruzar para `freight`. Essa OS corretiva bloqueia a
+    disponibilidade do veículo em `fleet` (`EM_MANUTENCAO`) do mesmo jeito que `create_ordem_
+    servico.py` faz para OS abertas manualmente — chamada cross-module após o commit."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -98,7 +101,7 @@ class RejectChecklistHandler(CommandHandler[RejectChecklistCommand, ChecklistDTO
                     fornecedor_executor_id=None, tipo=OrdemServicoTipo.CORRETIVA,
                     origem_abertura=OrdemServicoOrigemAbertura.CHECKLIST_REPROVADO,
                     descricao_problema=f"Aberta automaticamente pela reprovação do Checklist {checklist.codigo}: {command.observacao}",
-                    criado_por=None, now=now,
+                    hodometro_abertura_km=None, criado_por=None, now=now,
                 )
                 await os_repo.add(ordem_corretiva)
                 await os_history_repo.add(
@@ -121,5 +124,10 @@ class RejectChecklistHandler(CommandHandler[RejectChecklistCommand, ChecklistDTO
                 dados_depois=dados_depois, motivo=command.observacao,
             )
             await uow.commit()
+
+        if corrective_work_order_id is not None:
+            await VehicleAvailabilityProjector().apply_service_order_opened(
+                vehicle_id=checklist.veiculo_tracionador_id, at=now
+            )
 
         return ChecklistDTO.from_entity(checklist)

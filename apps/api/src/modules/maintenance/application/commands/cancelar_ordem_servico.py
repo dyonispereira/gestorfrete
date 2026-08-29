@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError, ValidationError
+from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
 from modules.maintenance.application.dtos.ordem_servico_dto import OrdemServicoDTO
 from modules.maintenance.domain.entities.ordem_servico_status_history_entry import OrdemServicoStatusHistoryEntry
 from modules.maintenance.infrastructure.persistence.repositories.sqlalchemy_ordem_servico_repository import (
@@ -28,7 +29,11 @@ class CancelarOrdemServicoCommand(Command):
 
 class CancelarOrdemServicoHandler(CommandHandler[CancelarOrdemServicoCommand, OrdemServicoDTO]):
     """`{ABERTA,EM_DIAGNOSTICO,AGUARDANDO_APROVACAO}→CANCELADA` — nunca a partir de `EM_EXECUCAO`
-    em diante (`003-MANUTENCAO.md`)."""
+    em diante (`003-MANUTENCAO.md`). Libera o veículo em `fleet` (`DISPONIVEL`) da mesma forma que
+    `concluir_ordem_servico.py` — a OS já o havia bloqueado (`EM_MANUTENCAO`) na abertura; deixá-lo
+    preso após um cancelamento seria um vazamento de estado, não uma regra documentada em
+    `003-MANUTENCAO.md` propriamente dita, mas a única leitura consistente com o par abertura/
+    liberação já descrito lá."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -63,5 +68,9 @@ class CancelarOrdemServicoHandler(CommandHandler[CancelarOrdemServicoCommand, Or
                 motivo=command.justificativa,
             )
             await uow.commit()
+
+        await VehicleAvailabilityProjector().apply_service_order_closed(
+            vehicle_id=ordem_servico.veiculo_tracionador_id, at=now
+        )
 
         return OrdemServicoDTO.from_entity(ordem_servico)

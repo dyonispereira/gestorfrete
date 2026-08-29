@@ -2,6 +2,7 @@ import { apiFetch } from "@/shared/lib/api-client";
 import type {
   ApproveCostRequest,
   CancelWorkOrderRequest,
+  ConcludeWorkOrderRequest,
   CreateWorkOrderRequest,
   DiagnoseWorkOrderRequest,
   PaginatedResponse,
@@ -58,8 +59,8 @@ export function iniciarExecucaoWorkOrder(id: string): Promise<WorkOrder> {
   return apiFetch<WorkOrder>(`/ordens-servico/${id}/commands/iniciar-execucao`, { method: "POST" });
 }
 
-export function concluirWorkOrder(id: string): Promise<WorkOrder> {
-  return apiFetch<WorkOrder>(`/ordens-servico/${id}/commands/concluir`, { method: "POST" });
+export function concluirWorkOrder(id: string, body: ConcludeWorkOrderRequest = {}): Promise<WorkOrder> {
+  return apiFetch<WorkOrder>(`/ordens-servico/${id}/commands/concluir`, { method: "POST", body });
 }
 
 export function fecharWorkOrder(id: string): Promise<WorkOrder> {

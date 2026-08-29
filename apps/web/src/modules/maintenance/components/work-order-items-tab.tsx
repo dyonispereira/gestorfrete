@@ -90,6 +90,12 @@ export function WorkOrderItemsTab({ workOrderId, canCreate }: WorkOrderItemsTabP
 
   const items = itemsQuery.data?.data ?? [];
 
+  const subtotalsByCategory = new Map<WorkOrderItemCostCategory, number>();
+  for (const item of items) {
+    subtotalsByCategory.set(item.cost_category, (subtotalsByCategory.get(item.cost_category) ?? 0) + Number(item.total_value));
+  }
+  const grandTotal = [...subtotalsByCategory.values()].reduce((sum, value) => sum + value, 0);
+
   return (
     <div className="flex flex-col gap-4">
       {canCreate ? (
@@ -127,6 +133,21 @@ export function WorkOrderItemsTab({ workOrderId, canCreate }: WorkOrderItemsTabP
           </TableBody>
         </Table>
       )}
+
+      {items.length > 0 ? (
+        <div className="flex flex-col gap-1 rounded-md border border-border p-4 text-sm">
+          {[...subtotalsByCategory.entries()].map(([category, subtotal]) => (
+            <div key={category} className="flex items-center justify-between gap-2 text-muted-foreground">
+              <span>{CATEGORY_LABEL[category]}</span>
+              <span>{formatMoney(subtotal.toFixed(2))}</span>
+            </div>
+          ))}
+          <div className="mt-1 flex items-center justify-between gap-2 border-t border-border pt-2 font-medium">
+            <span>Custo total (sempre derivado dos itens)</span>
+            <span>{formatMoney(grandTotal.toFixed(2))}</span>
+          </div>
+        </div>
+      ) : null}
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent className="flex flex-col gap-6 overflow-y-auto sm:max-w-md">

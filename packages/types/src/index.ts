@@ -415,7 +415,7 @@ export type BodyType = "CARRETA" | "TANQUE" | "BAU" | "GRANELEIRO" | "PRANCHA" |
 export type ImplementAvailability = "DISPONIVEL" | "EM_USO" | "INATIVO";
 export type CombinationType = "SIMPLES" | "BITREM" | "RODOTREM";
 export type CompositionStatus = "VALIDA" | "INVALIDA";
-export type OdometerOrigin = "ABASTECIMENTO" | "CHECKLIST" | "MANUAL" | "TELEMETRIA";
+export type OdometerOrigin = "ABASTECIMENTO" | "CHECKLIST" | "MANUAL" | "TELEMETRIA" | "ORDEM_SERVICO";
 
 /** Always empty — `CreateVehicleHandler`/`UpdateVehicleHandler` never populate it. */
 export interface VehicleOperational {
@@ -1073,6 +1073,8 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   execution_started_at?: ISODateTime;
   completed_at?: ISODateTime;
+  opening_odometer_km?: string;
+  completion_odometer_km?: string;
   audit: AuditMetadata;
 }
 
@@ -1082,6 +1084,11 @@ export interface CreateWorkOrderRequest {
   problem_description: string;
   composition_id?: UUID;
   supplier_id?: UUID;
+  opening_odometer_km?: string;
+}
+
+export interface ConcludeWorkOrderRequest {
+  completion_odometer_km?: string;
 }
 
 export interface DiagnoseWorkOrderRequest {

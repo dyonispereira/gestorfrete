@@ -35,8 +35,9 @@ const LABEL_BY_STATUS: Record<AvailabilityStatus, string> = {
 
 /**
  * Read model puro — nenhuma ação nesta tela, de propósito. Não existe endpoint de escrita para
- * Disponibilidade em lugar nenhum do Backend (Lote Frota audit); o projetor que calcula isso ainda
- * não está conectado aos eventos reais de viagem/manutenção neste ambiente.
+ * Disponibilidade em lugar nenhum do Backend. O lado de `maintenance` do projetor (`EM_MANUTENCAO`
+ * ↔ `DISPONIVEL` em OS aberta/concluída/cancelada) está conectado desde a Lote Frota e Manutenção,
+ * Parte 2; o lado de `freight` (`EM_VIAGEM` no despacho) ainda não está — gap real, não escondido.
  */
 export default function VehicleAvailabilityPage() {
   const [page, setPage] = React.useState(1);

@@ -5,6 +5,7 @@ import * as React from "react";
 import {
   Button,
   Checkbox,
+  Input,
   Label,
   Select,
   SelectContent,
@@ -65,6 +66,9 @@ export function WorkOrderCommandsPanel({ workOrder }: { workOrder: WorkOrder }) 
   const [textDialog, setTextDialog] = React.useState<TextDialogKey | null>(null);
   const [text, setText] = React.useState("");
 
+  const [concludeOpen, setConcludeOpen] = React.useState(false);
+  const [completionOdometerKm, setCompletionOdometerKm] = React.useState("");
+
   const diagnosticar = useDiagnosticarWorkOrderMutation();
   const submeterAprovacao = useSubmeterAprovacaoWorkOrderMutation();
   const aprovarCusto = useAprovarCustoWorkOrderMutation();
@@ -98,6 +102,20 @@ export function WorkOrderCommandsPanel({ workOrder }: { workOrder: WorkOrder }) 
       toast.success(successMessage);
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Não foi possível executar a ação.");
+    }
+  }
+
+  async function handleConcludeConfirm() {
+    try {
+      await concluir.mutateAsync({
+        workOrderId: workOrder.id,
+        body: { completion_odometer_km: completionOdometerKm || undefined },
+      });
+      toast.success("Ordem de serviço concluída.");
+      setConcludeOpen(false);
+      setCompletionOdometerKm("");
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Não foi possível concluir a ordem de serviço.");
     }
   }
 
@@ -168,7 +186,7 @@ export function WorkOrderCommandsPanel({ workOrder }: { workOrder: WorkOrder }) 
   }
   if (status === "EM_EXECUCAO" && canEdit) {
     buttons.push(
-      <Button key="concluir" onClick={() => runSimple(() => concluir.mutateAsync(workOrder.id), "Ordem de serviço concluída.")}>
+      <Button key="concluir" onClick={() => setConcludeOpen(true)}>
         Concluir
       </Button>
     );
@@ -259,6 +277,38 @@ export function WorkOrderCommandsPanel({ workOrder }: { workOrder: WorkOrder }) 
               </Button>
             </div>
           </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={concludeOpen} onOpenChange={setConcludeOpen}>
+        <SheetContent className="flex flex-col gap-6 overflow-y-auto sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Concluir ordem de serviço</SheetTitle>
+            <SheetDescription>
+              Congela o custo realizado com a soma dos itens e libera o veículo em Disponibilidade.
+              Hodômetro opcional — quando informado, também vira uma Leitura de Hodômetro real do veículo.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-1 flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="work-order-completion-odometer">Hodômetro na conclusão (opcional)</Label>
+              <Input
+                id="work-order-completion-odometer"
+                type="number"
+                step="0.01"
+                value={completionOdometerKm}
+                onChange={(event) => setCompletionOdometerKm(event.target.value)}
+              />
+            </div>
+            <div className="mt-auto flex justify-end gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => setConcludeOpen(false)}>
+                Voltar
+              </Button>
+              <Button disabled={concluir.isPending} onClick={handleConcludeConfirm}>
+                {concluir.isPending ? "Concluindo…" : "Concluir ordem de serviço"}
+              </Button>
+            </div>
+          </div>
         </SheetContent>
       </Sheet>
 

@@ -6,6 +6,7 @@ import * as workOrdersService from "@/modules/maintenance/services/work-orders";
 import type {
   ApproveCostRequest,
   CancelWorkOrderRequest,
+  ConcludeWorkOrderRequest,
   CreateWorkOrderRequest,
   DiagnoseWorkOrderRequest,
   RejectCostRequest,
@@ -87,8 +88,9 @@ export function useIniciarExecucaoWorkOrderMutation() {
 export function useConcluirWorkOrderMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (workOrderId: string) => workOrdersService.concluirWorkOrder(workOrderId),
-    onSuccess: (_data, workOrderId) => invalidateWorkOrder(queryClient, workOrderId),
+    mutationFn: ({ workOrderId, body }: { workOrderId: string; body?: ConcludeWorkOrderRequest }) =>
+      workOrdersService.concluirWorkOrder(workOrderId, body),
+    onSuccess: (_data, { workOrderId }) => invalidateWorkOrder(queryClient, workOrderId),
   });
 }
 

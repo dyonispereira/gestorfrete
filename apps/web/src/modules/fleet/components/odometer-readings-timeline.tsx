@@ -17,6 +17,7 @@ const ORIGIN_LABEL: Record<OdometerOrigin, string> = {
   CHECKLIST: "Checklist",
   MANUAL: "Manual",
   TELEMETRIA: "Telemetria",
+  ORDEM_SERVICO: "Ordem de serviço",
 };
 
 interface OdometerReadingsTimelineProps {

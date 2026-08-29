@@ -47,6 +47,8 @@ class OrdemServicoModel(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="ABERTA")
     data_inicio_execucao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     data_conclusao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hodometro_abertura_km: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    hodometro_conclusao_km: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     criado_por: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

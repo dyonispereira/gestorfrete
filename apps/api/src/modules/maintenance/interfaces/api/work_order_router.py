@@ -64,6 +64,7 @@ from modules.maintenance.application.queries.list_ordens_servico import ListOrde
 from modules.maintenance.interfaces.schemas.work_order_schemas import (
     ApproveCostRequest,
     CancelWorkOrderRequest,
+    ConcludeWorkOrderRequest,
     CostApprovalResponse,
     CreateWorkOrderItemRequest,
     CreateWorkOrderRequest,
@@ -117,7 +118,7 @@ async def create_work_order(
         CreateOrdemServicoCommand(
             actor=actor, veiculo_tracionador_id=body.tractor_unit_id, tipo=body.type,
             descricao_problema=body.problem_description, composicao_veicular_id=body.composition_id,
-            fornecedor_executor_id=body.supplier_id,
+            fornecedor_executor_id=body.supplier_id, hodometro_abertura_km=body.opening_odometer_km,
         )
     )
     return WorkOrderResponse.from_dto(dto)
@@ -183,10 +184,15 @@ async def iniciar_execucao_work_order(
 
 @router.post("/{work_order_id}/commands/concluir", response_model=WorkOrderResponse)
 async def concluir_work_order(
-    work_order_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("maintenance.work_order.edit"))
+    work_order_id: uuid.UUID, body: ConcludeWorkOrderRequest,
+    actor: AuthenticatedActor = Depends(require_permission("maintenance.work_order.edit")),
 ) -> WorkOrderResponse:
     handler = ConcluirOrdemServicoHandler()
-    dto = await handler.handle(ConcluirOrdemServicoCommand(actor=actor, ordem_servico_id=work_order_id))
+    dto = await handler.handle(
+        ConcluirOrdemServicoCommand(
+            actor=actor, ordem_servico_id=work_order_id, hodometro_conclusao_km=body.completion_odometer_km,
+        )
+    )
     return WorkOrderResponse.from_dto(dto)
 
 
