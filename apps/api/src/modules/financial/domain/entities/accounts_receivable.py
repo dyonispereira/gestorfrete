@@ -13,7 +13,9 @@ _EDITABLE_STATUSES = frozenset({ReceivableStatus.PENDENTE, ReceivableStatus.VENC
 
 class AccountsReceivable(BaseEntity[uuid.UUID]):
     """`contas_receber` — sub-recurso de `Invoice` (`fatura_id NOT NULL` fisicamente, D260, nunca
-    existe fora de uma Fatura). Sem `audit` (D391-nota: schema nunca prometeu, DDL nunca teve)."""
+    existe fora de uma Fatura). Sem `audit` (D391-nota: schema nunca prometeu, DDL nunca teve).
+    `competencia` (Lote Financeiro, Parte 1) é sempre explícita — nunca calculada de
+    `data_vencimento`."""
 
     def __init__(
         self,
@@ -23,6 +25,7 @@ class AccountsReceivable(BaseEntity[uuid.UUID]):
         numero_parcela: int,
         valor: Decimal,
         data_vencimento: date,
+        competencia: date,
         data_recebimento: datetime | None,
         status: ReceivableStatus,
     ) -> None:
@@ -31,16 +34,18 @@ class AccountsReceivable(BaseEntity[uuid.UUID]):
         self.numero_parcela = numero_parcela
         self.valor = valor
         self.data_vencimento = data_vencimento
+        self.competencia = competencia
         self.data_recebimento = data_recebimento
         self.status = status
 
     @classmethod
     def create(
-        cls, *, fatura_id: uuid.UUID, numero_parcela: int, valor: Decimal, data_vencimento: date
+        cls, *, fatura_id: uuid.UUID, numero_parcela: int, valor: Decimal, data_vencimento: date, competencia: date
     ) -> "AccountsReceivable":
         return cls(
             id=uuid.uuid4(), fatura_id=fatura_id, numero_parcela=numero_parcela, valor=valor,
-            data_vencimento=data_vencimento, data_recebimento=None, status=ReceivableStatus.PENDENTE,
+            data_vencimento=data_vencimento, competencia=competencia, data_recebimento=None,
+            status=ReceivableStatus.PENDENTE,
         )
 
     @property

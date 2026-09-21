@@ -57,6 +57,12 @@ from modules.identity_access.infrastructure.persistence.models.identity_models i
     papel_permissao,
     usuarios_papeis,
 )
+from modules.maintenance.infrastructure.persistence.models.aprovacao_custo_model import AprovacaoCustoModel
+from modules.maintenance.infrastructure.persistence.models.item_ordem_servico_model import ItemOrdemServicoModel
+from modules.maintenance.infrastructure.persistence.models.ordem_servico_model import (
+    OrdemServicoModel,
+    OrdemServicoStatusHistoryModel,
+)
 from modules.maintenance.infrastructure.persistence.models.supplier_model import SupplierModel
 from modules.tenancy.infrastructure.persistence.models.tenant_model import TenantModel
 from shared.collaboration.infrastructure.persistence.models.attachment_model import AttachmentModel
@@ -89,6 +95,11 @@ PERMISSION_CATALOG = [
     ("drivers.driver.create", "Criar motoristas", "drivers"),
     ("fleet.vehicle.create", "Criar veículos", "fleet"),
     ("maintenance.supplier.create", "Criar fornecedores", "maintenance"),
+    ("maintenance.work_order.view", "Ver ordens de serviço", "maintenance"),
+    ("maintenance.work_order.create", "Criar ordens de serviço", "maintenance"),
+    ("maintenance.work_order.edit", "Editar ordens de serviço", "maintenance"),
+    ("maintenance.work_order.close", "Fechar ordens de serviço", "maintenance"),
+    ("maintenance.work_order_item.create", "Criar itens de ordem de serviço", "maintenance"),
     ("financial.cost_center.view", "Ver centros de custo", "financial"),
     ("financial.cost_center.create", "Criar centros de custo", "financial"),
     ("financial.chart_of_accounts.view", "Ver plano de contas", "financial"),
@@ -292,6 +303,16 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         )
         await session.execute(delete(AccountsPayableModel).where(AccountsPayableModel.tenant_id == tenant_id))
         await session.execute(delete(BankAccountModel).where(BankAccountModel.tenant_id == tenant_id))
+
+        # Ordem de Serviço (Lote Financeiro, Parte 1 — OrdemServicoFechada → Conta a Pagar) — sai
+        # antes de Fornecedor/Centro de Custo/Plano de Contas/Veículo, que ela referencia.
+        await session.execute(delete(AprovacaoCustoModel).where(AprovacaoCustoModel.tenant_id == tenant_id))
+        await session.execute(delete(ItemOrdemServicoModel).where(ItemOrdemServicoModel.tenant_id == tenant_id))
+        await session.execute(
+            delete(OrdemServicoStatusHistoryModel).where(OrdemServicoStatusHistoryModel.tenant_id == tenant_id)
+        )
+        await session.execute(delete(OrdemServicoModel).where(OrdemServicoModel.tenant_id == tenant_id))
+
         await session.execute(delete(ChartOfAccountsModel).where(ChartOfAccountsModel.tenant_id == tenant_id))
         await session.execute(delete(PaymentMethodModel).where(PaymentMethodModel.tenant_id == tenant_id))
         await session.execute(delete(CostCenterModel).where(CostCenterModel.tenant_id == tenant_id))
@@ -566,7 +587,7 @@ class TestChartOfAccountsFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": "100.00", "due_date": "2026-09-01", "chart_of_accounts_id": root_id,
+                "value": "100.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": root_id,
             },
         )
         assert payable.status_code == 201, payable.text
@@ -615,7 +636,7 @@ class TestAccountsPayableFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": "500.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "500.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert create.status_code == 201, create.text
@@ -634,7 +655,7 @@ class TestAccountsPayableFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert create.status_code == 201, create.text
@@ -669,7 +690,7 @@ class TestAccountsPayableFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         payable_id = create.json()["id"]
@@ -704,7 +725,7 @@ class TestAccountsPayableFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": "100.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "100.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         payable_id = create.json()["id"]
@@ -727,7 +748,7 @@ class TestAccountsPayableFlow:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": "100.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "100.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         payable_id = create.json()["id"]
@@ -757,7 +778,7 @@ class TestInvoiceAndReceivableFlow:
             json={
                 "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
                 "payment_method_id": str(payment_method_id),
-                "installments": [{"value": "1000.00", "due_date": "2026-10-01"}],
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
         )
         assert missing_precondition.status_code == 409, missing_precondition.text
@@ -778,7 +799,7 @@ class TestInvoiceAndReceivableFlow:
                 "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
                 "payment_method_id": str(payment_method_id),
                 "installments": [
-                    {"value": "600.00", "due_date": "2026-10-01"}, {"value": "400.00", "due_date": "2026-11-01"},
+                    {"value": "600.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}, {"value": "400.00", "due_date": "2026-11-01", "accounting_period": "2026-11-01"},
                 ],
             },
         )
@@ -796,7 +817,7 @@ class TestInvoiceAndReceivableFlow:
 
         extra_installment = await client.post(
             f"/api/v1/faturas/{invoice_id}/contas-receber", headers=headers,
-            json={"value": "50.00", "due_date": "2026-12-01"},
+            json={"value": "50.00", "due_date": "2026-12-01", "accounting_period": "2026-12-01"},
         )
         assert extra_installment.status_code == 201, extra_installment.text
         assert extra_installment.json()["installment_number"] == 3
@@ -892,7 +913,7 @@ class TestTotalsDerivedFromAllocationAudit:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "VIAGEM", "trip_id": trip_id,
-                "value": "300.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "300.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert first.status_code == 201, first.text
@@ -905,7 +926,7 @@ class TestTotalsDerivedFromAllocationAudit:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "VIAGEM", "trip_id": trip_id,
-                "value": "200.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "200.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert second.status_code == 201, second.text
@@ -968,7 +989,7 @@ class TestStatusHistoryAudit:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         payable_id = create.json()["id"]
@@ -1004,7 +1025,7 @@ class TestStatusHistoryAudit:
             "/api/v1/faturas", headers=headers,
             json={
                 "trip_id": trip_id, "client_id": client_id, "total_value": "100.00",
-                "payment_method_id": str(payment_method_id), "installments": [{"value": "100.00", "due_date": "2026-10-01"}],
+                "payment_method_id": str(payment_method_id), "installments": [{"value": "100.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
         )
         invoice_id = create_invoice.json()["id"]
@@ -1042,7 +1063,7 @@ class TestEstornoNeverRevertsAudit:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
-                "value": "300.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "300.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         payable_id = create.json()["id"]
@@ -1123,7 +1144,7 @@ class TestTripFinancialsFieldLevelRbacAudit:
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "VIAGEM", "trip_id": trip_id,
-                "value": "400.00", "due_date": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "400.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert payable.status_code == 201, payable.text
@@ -1134,7 +1155,7 @@ class TestTripFinancialsFieldLevelRbacAudit:
             "/api/v1/faturas", headers=headers,
             json={
                 "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
-                "payment_method_id": str(payment_method_id), "installments": [{"value": "1000.00", "due_date": "2026-10-01"}],
+                "payment_method_id": str(payment_method_id), "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
         )
         assert invoice.status_code == 201, invoice.text
@@ -1196,6 +1217,138 @@ class TestTripFinancialsFieldLevelRbacAudit:
 
         without_trip_view = await client.get(f"/api/v1/viagens/{trip_id}/financeiro", headers=no_trip_view_headers)
         assert without_trip_view.status_code == 403
+
+
+async def _create_work_order_ready_to_close(
+    client: AsyncClient, headers: dict[str, str], *, vehicle_id: str, supplier_id: str | None,
+    cost_center_id: str | None, chart_of_accounts_id: str | None,
+) -> str:
+    """Cria uma OS e a leva até `CONCLUIDA` (pronta para `fechar`), com um item de custo real."""
+
+    body: dict[str, object] = {
+        "tractor_unit_id": vehicle_id, "type": "CORRETIVA", "problem_description": "Pane elétrica.",
+    }
+    if supplier_id is not None:
+        body["supplier_id"] = supplier_id
+    if cost_center_id is not None:
+        body["cost_center_id"] = cost_center_id
+    if chart_of_accounts_id is not None:
+        body["chart_of_accounts_id"] = chart_of_accounts_id
+    create = await client.post("/api/v1/ordens-servico", headers=headers, json=body)
+    assert create.status_code == 201, create.text
+    work_order_id = create.json()["id"]
+
+    diagnose = await client.post(
+        f"/api/v1/ordens-servico/{work_order_id}/commands/diagnosticar", headers=headers,
+        json={"technical_diagnosis": "Curto no chicote.", "needs_approval": False},
+    )
+    assert diagnose.status_code == 200, diagnose.text
+
+    start = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/iniciar-execucao", headers=headers)
+    assert start.status_code == 200, start.text
+
+    item = await client.post(
+        f"/api/v1/ordens-servico/{work_order_id}/itens", headers=headers,
+        json={"cost_category": "PECAS", "description": "Chicote novo", "quantity": "1", "unit_value": "350.00"},
+    )
+    assert item.status_code == 201, item.text
+
+    conclude = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/concluir", headers=headers, json={})
+    assert conclude.status_code == 200, conclude.text
+
+    return work_order_id
+
+
+class TestOrdemServicoToPayableFlow:
+    """Sprint 15/Lote Financeiro, Parte 1 — `OrdemServicoFechada` → Conta a Pagar automática."""
+
+    async def test_fechar_with_supplier_and_cost_center_creates_payable_automatically(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+        supplier_id = await _create_supplier(client, headers)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+
+        work_order_id = await _create_work_order_ready_to_close(
+            client, headers, vehicle_id=vehicle_id, supplier_id=supplier_id, cost_center_id=cost_center_id,
+            chart_of_accounts_id=chart_id,
+        )
+
+        close = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/fechar", headers=headers)
+        assert close.status_code == 200, close.text
+
+        payables = await client.get(
+            "/api/v1/contas-pagar", headers=headers, params={"origin": "ORDEM_SERVICO"}
+        )
+        assert payables.status_code == 200, payables.text
+        matches = [p for p in payables.json()["data"] if p["maintenance_order_id"] == work_order_id]
+        assert len(matches) == 1
+        payable = matches[0]
+        assert payable["value"] == "350.00"
+        assert payable["vehicle_id"] == vehicle_id
+        assert payable["driver_id"] is None
+        assert payable["trip_id"] is None
+        assert payable["cost_center_id"] == cost_center_id
+        assert payable["supplier_id"] == supplier_id
+        today = date.today()
+        assert payable["accounting_period"] == today.replace(day=1).isoformat()
+
+    async def test_fechar_without_supplier_does_not_create_payable(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Mão de obra 100% interna — sem Fornecedor, não há título a pagar a ninguém."""
+
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+
+        work_order_id = await _create_work_order_ready_to_close(
+            client, headers, vehicle_id=vehicle_id, supplier_id=None, cost_center_id=cost_center_id,
+            chart_of_accounts_id=chart_id,
+        )
+
+        close = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/fechar", headers=headers)
+        assert close.status_code == 200, close.text
+
+        payables = await client.get(
+            "/api/v1/contas-pagar", headers=headers, params={"origin": "ORDEM_SERVICO"}
+        )
+        assert payables.status_code == 200, payables.text
+        matches = [p for p in payables.json()["data"] if p["maintenance_order_id"] == work_order_id]
+        assert matches == []
+
+    async def test_fechar_twice_is_blocked_before_it_could_ever_duplicate_a_payable(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """`FECHADA` é terminal na própria máquina de estados da OS — um retry de `fechar` nunca
+        chega a reprocessar a criação da Conta a Pagar, é barrado antes disso."""
+
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+        supplier_id = await _create_supplier(client, headers)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+
+        work_order_id = await _create_work_order_ready_to_close(
+            client, headers, vehicle_id=vehicle_id, supplier_id=supplier_id, cost_center_id=cost_center_id,
+            chart_of_accounts_id=chart_id,
+        )
+
+        first_close = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/fechar", headers=headers)
+        assert first_close.status_code == 200, first_close.text
+
+        second_close = await client.post(f"/api/v1/ordens-servico/{work_order_id}/commands/fechar", headers=headers)
+        assert second_close.status_code == 409
+        assert second_close.json()["error"]["code"] == "MAINTENANCE_WORK_ORDER_INVALID_TRANSITION"
+
+        payables = await client.get(
+            "/api/v1/contas-pagar", headers=headers, params={"origin": "ORDEM_SERVICO"}
+        )
+        matches = [p for p in payables.json()["data"] if p["maintenance_order_id"] == work_order_id]
+        assert len(matches) == 1
 
 
 class TestTenantIsolation:

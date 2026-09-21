@@ -28,7 +28,8 @@ def _to_entity(model: OrdemServicoModel) -> OrdemServico:
         necessita_aprovacao=model.necessita_aprovacao, evidencia_conclusao_exigida=model.evidencia_conclusao_exigida,
         status=OrdemServicoStatus(model.status), data_inicio_execucao=model.data_inicio_execucao,
         data_conclusao=model.data_conclusao, hodometro_abertura_km=model.hodometro_abertura_km,
-        hodometro_conclusao_km=model.hodometro_conclusao_km, criado_em=model.criado_em, criado_por=model.criado_por,
+        hodometro_conclusao_km=model.hodometro_conclusao_km, centro_custo_id=model.centro_custo_id,
+        plano_contas_id=model.plano_contas_id, criado_em=model.criado_em, criado_por=model.criado_por,
         atualizado_em=model.atualizado_em, atualizado_por=model.atualizado_por,
     )
 
@@ -89,6 +90,8 @@ class SqlAlchemyOrdemServicoRepository(OrdemServicoRepository):
         model.data_conclusao = aggregate.data_conclusao
         model.hodometro_abertura_km = aggregate.hodometro_abertura_km
         model.hodometro_conclusao_km = aggregate.hodometro_conclusao_km
+        model.centro_custo_id = aggregate.centro_custo_id
+        model.plano_contas_id = aggregate.plano_contas_id
         model.criado_em = aggregate.criado_em
         model.criado_por = aggregate.criado_por
         model.atualizado_em = aggregate.atualizado_em

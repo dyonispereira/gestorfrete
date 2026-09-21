@@ -25,7 +25,9 @@ aqui primeiro). Formalizada agora porque o desbloqueio real de `AGUARDANDO_CHECK
 - **Aggregate Root**: Sim.
 - **Bounded Context proprietário**: `maintenance`
 - **Principais relacionamentos**: Veículo Tracionador, Fornecedor, Funcionário/Mecânico
-  (referenciados por ID); Item de Ordem de Serviço, Solicitação de Peça, Aprovação de Custo (filhos
+  (referenciados por ID); Centro de Custo (referenciado, opcional — **Reconciliado, Lote
+  Financeiro, Parte 1**: habilita a Conta a Pagar automática no fechamento, ver
+  `006-financeiro.md`); Item de Ordem de Serviço, Solicitação de Peça, Aprovação de Custo (filhos
   do agregado).
 - **Eventos que publica**: `OrdemServicoAberta`, `OrdemServicoAprovacaoPendente`,
   `OrdemServicoConcluida`, `OrdemServicoFechada`, `OrdemServicoCancelada` (já catalogados em

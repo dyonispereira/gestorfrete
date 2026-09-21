@@ -26,6 +26,7 @@ class AccountsReceivableModel(Base):
     numero_parcela: Mapped[int] = mapped_column(Integer, nullable=False)
     valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
+    competencia: Mapped[date] = mapped_column(Date, nullable=False)
     data_recebimento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String, nullable=False, default="PENDENTE")
 

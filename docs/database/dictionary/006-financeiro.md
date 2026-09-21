@@ -53,6 +53,7 @@ Dono: `financial` · Natureza: Transactional Data · Parte do agregado Fatura.
 | CONTA_RECEBER.DATA_VENCIMENTO | Data de vencimento | Data | Sim | Calculado (prazo do contrato/Forma de Pagamento) | Não | Interno | Granularidade: dia (D074) |
 | CONTA_RECEBER.DATA_RECEBIMENTO | Data de recebimento | Data/Hora | Não | Capturado (confirmação de pagamento) | Não | Interno | Granularidade: segundo (D074) |
 | CONTA_RECEBER.STATUS | Status | Enum | Sim | Calculado | Sim | Interno | Valores: `Pendente`/`Vencida`/`Recebida`/`Conciliada`. **Atributo Crítico (D077)** — mesmo tratamento de `STATUS_FINANCEIRO` em `002-operacao.md`: imutável após `Conciliada` (D100), correção por Estorno Financeiro |
+| CONTA_RECEBER.COMPETENCIA | Competência (período contábil) | Data | Sim | Informado, explícito na criação | Não | Financeiro | Reconciliado (Lote Financeiro, Parte 1) — mês/ano de referência contábil; **nunca inferido** de `DATA_VENCIMENTO`. Granularidade armazenada: dia, sempre normalizado ao primeiro dia do mês de competência |
 
 ---
 
@@ -70,6 +71,9 @@ Dono: `financial` · Natureza: Transactional Data · Aggregate Root.
 | CONTA_PAGAR.DATA_VENCIMENTO | Data de vencimento | Data | Sim | Informado | Não | Interno | Granularidade: dia (D074) |
 | CONTA_PAGAR.PLANO_CONTAS_ID | Categoria contábil | Referência | Sim | Informado | Não | Interno | FK para Plano de Contas |
 | CONTA_PAGAR.STATUS | Status | Enum | Sim | Calculado (transições da máquina de estados) | Sim, em `ContaPagarStatusHistory` (D017/D018) | Interno | Valores completos: `005-FINANCEIRO.md`. **Atributo Crítico (D077)** — imutável após `Conciliada` (D100) |
+| CONTA_PAGAR.COMPETENCIA | Competência (período contábil) | Data | Sim | Informado, explícito na criação | Não | Financeiro | Reconciliado (Lote Financeiro, Parte 1) — mesmo princípio de `CONTA_RECEBER.COMPETENCIA`, nunca inferido de `DATA_VENCIMENTO` |
+| CONTA_PAGAR.VEICULO_TRACIONADOR_ID | Veículo Tracionador | Referência | Não | Informado, ou Capturado quando a origem é Ordem de Serviço | Não | Interno | Reconciliado (Lote Financeiro, Parte 1) — FK opcional para `veiculos_tracionadores`. Dimensão direta só em Conta a Pagar (Conta a Receber deriva via Fatura → Viagem, sem duplicar) |
+| CONTA_PAGAR.MOTORISTA_ID | Motorista | Referência | Não | Informado | Não | Interno | Reconciliado (Lote Financeiro, Parte 1) — FK opcional para `motoristas`. **Nunca herdado automaticamente** de `VIAGEM_ID`/da Ordem de Serviço — só preenchido quando o lançamento é atribuível ao motorista por si só (ex.: multa, reembolso) |
 
 ---
 

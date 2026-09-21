@@ -31,6 +31,8 @@ class OrdemServicoDTO:
     data_conclusao: datetime | None
     hodometro_abertura_km: Decimal | None
     hodometro_conclusao_km: Decimal | None
+    centro_custo_id: uuid.UUID | None
+    plano_contas_id: uuid.UUID | None
     criado_em: datetime
     criado_por: uuid.UUID | None
     atualizado_em: datetime
@@ -50,6 +52,7 @@ class OrdemServicoDTO:
             evidencia_conclusao_exigida=entity.evidencia_conclusao_exigida, status=entity.status.value,
             data_inicio_execucao=entity.data_inicio_execucao, data_conclusao=entity.data_conclusao,
             hodometro_abertura_km=entity.hodometro_abertura_km, hodometro_conclusao_km=entity.hodometro_conclusao_km,
+            centro_custo_id=entity.centro_custo_id, plano_contas_id=entity.plano_contas_id,
             criado_em=entity.criado_em, criado_por=entity.criado_por, atualizado_em=entity.atualizado_em,
             atualizado_por=entity.atualizado_por,
         )

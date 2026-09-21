@@ -21,7 +21,12 @@ _ORIGENS_COM_ALVO_OBRIGATORIO = frozenset({PayableOrigin.VIAGEM, PayableOrigin.O
 
 class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
     """`contas_pagar` — Aggregate Root de `financial`. D273: sem `CANCELADA`, desfecho negativo
-    real é `REJEITADA`. D391 — ganha o bloco padrão de auditoria, ausente na DDL congelada."""
+    real é `REJEITADA`. D391 — ganha o bloco padrão de auditoria, ausente na DDL congelada.
+    `competencia` (Lote Financeiro, Parte 1) é sempre explícita — nunca calculada de
+    `data_vencimento`. `veiculo_tracionador_id`/`motorista_id` são opcionais e independentes:
+    `motorista_id` nunca é herdado automaticamente de `viagem_id`, mesmo quando ambos fazem
+    sentido — só setado quando o lançamento é atribuível ao motorista por si só (D033/D034 — não
+    duplica uma dimensão que já é derivável via Viagem quando não é o caso)."""
 
     def __init__(
         self,
@@ -32,8 +37,11 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         origem: PayableOrigin,
         viagem_id: uuid.UUID | None,
         ordem_servico_id: uuid.UUID | None,
+        veiculo_tracionador_id: uuid.UUID | None,
+        motorista_id: uuid.UUID | None,
         valor: Decimal,
         data_vencimento: date,
+        competencia: date,
         plano_contas_id: uuid.UUID,
         status: PayableStatus,
         audit: AuditMetadata,
@@ -44,8 +52,11 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         self.origem = origem
         self.viagem_id = viagem_id
         self.ordem_servico_id = ordem_servico_id
+        self.veiculo_tracionador_id = veiculo_tracionador_id
+        self.motorista_id = motorista_id
         self.valor = valor
         self.data_vencimento = data_vencimento
+        self.competencia = competencia
         self.plano_contas_id = plano_contas_id
         self.status = status
         self.audit = audit
@@ -70,8 +81,11 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         origem: PayableOrigin,
         viagem_id: uuid.UUID | None,
         ordem_servico_id: uuid.UUID | None,
+        veiculo_tracionador_id: uuid.UUID | None,
+        motorista_id: uuid.UUID | None,
         valor: Decimal,
         data_vencimento: date,
+        competencia: date,
         plano_contas_id: uuid.UUID,
         audit: AuditMetadata,
     ) -> "AccountsPayable":
@@ -81,7 +95,8 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         status = PayableStatus.AGUARDANDO_APROVACAO if valor > ALCADA_PADRAO else PayableStatus.APROVADA
         return cls(
             id=uuid.uuid4(), fornecedor_id=fornecedor_id, centro_custo_id=centro_custo_id, origem=origem,
-            viagem_id=viagem_id, ordem_servico_id=ordem_servico_id, valor=valor, data_vencimento=data_vencimento,
+            viagem_id=viagem_id, ordem_servico_id=ordem_servico_id, veiculo_tracionador_id=veiculo_tracionador_id,
+            motorista_id=motorista_id, valor=valor, data_vencimento=data_vencimento, competencia=competencia,
             plano_contas_id=plano_contas_id, status=status, audit=audit,
         )
 

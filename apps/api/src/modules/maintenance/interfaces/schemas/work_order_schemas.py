@@ -34,6 +34,8 @@ class WorkOrderResponse(BaseModel):
     completed_at: datetime | None
     opening_odometer_km: Decimal | None
     completion_odometer_km: Decimal | None
+    cost_center_id: uuid.UUID | None
+    chart_of_accounts_id: uuid.UUID | None
     audit: AuditMetadataResponse
 
     @staticmethod
@@ -47,6 +49,7 @@ class WorkOrderResponse(BaseModel):
             completion_evidence_required=dto.evidencia_conclusao_exigida, status=dto.status,
             execution_started_at=dto.data_inicio_execucao, completed_at=dto.data_conclusao,
             opening_odometer_km=dto.hodometro_abertura_km, completion_odometer_km=dto.hodometro_conclusao_km,
+            cost_center_id=dto.centro_custo_id, chart_of_accounts_id=dto.plano_contas_id,
             audit=AuditMetadataResponse(
                 created_at=dto.criado_em, created_by=dto.criado_por, updated_at=dto.atualizado_em,
                 updated_by=dto.atualizado_por,
@@ -63,6 +66,8 @@ class CreateWorkOrderRequest(BaseModel):
     composition_id: uuid.UUID | None = None
     supplier_id: uuid.UUID | None = None
     opening_odometer_km: Decimal | None = None
+    cost_center_id: uuid.UUID | None = None
+    chart_of_accounts_id: uuid.UUID | None = None
 
 
 class DiagnoseWorkOrderRequest(BaseModel):

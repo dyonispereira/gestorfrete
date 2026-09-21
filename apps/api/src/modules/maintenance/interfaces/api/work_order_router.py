@@ -119,6 +119,7 @@ async def create_work_order(
             actor=actor, veiculo_tracionador_id=body.tractor_unit_id, tipo=body.type,
             descricao_problema=body.problem_description, composicao_veicular_id=body.composition_id,
             fornecedor_executor_id=body.supplier_id, hodometro_abertura_km=body.opening_odometer_km,
+            centro_custo_id=body.cost_center_id, plano_contas_id=body.chart_of_accounts_id,
         )
     )
     return WorkOrderResponse.from_dto(dto)

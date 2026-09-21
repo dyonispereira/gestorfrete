@@ -101,7 +101,8 @@ class RejectChecklistHandler(CommandHandler[RejectChecklistCommand, ChecklistDTO
                     fornecedor_executor_id=None, tipo=OrdemServicoTipo.CORRETIVA,
                     origem_abertura=OrdemServicoOrigemAbertura.CHECKLIST_REPROVADO,
                     descricao_problema=f"Aberta automaticamente pela reprovação do Checklist {checklist.codigo}: {command.observacao}",
-                    hodometro_abertura_km=None, criado_por=None, now=now,
+                    hodometro_abertura_km=None, centro_custo_id=None, plano_contas_id=None,
+                    criado_por=None, now=now,
                 )
                 await os_repo.add(ordem_corretiva)
                 await os_history_repo.add(

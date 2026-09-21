@@ -135,7 +135,8 @@ async def create_accounts_payable(
         CreateAccountsPayableCommand(
             actor=actor, supplier_id=body.supplier_id, cost_center_id=body.cost_center_id,
             origem=PayableOrigin(body.origin), trip_id=body.trip_id,
-            maintenance_order_id=body.maintenance_order_id, valor=body.value, data_vencimento=body.due_date,
+            maintenance_order_id=body.maintenance_order_id, vehicle_id=body.vehicle_id, driver_id=body.driver_id,
+            valor=body.value, data_vencimento=body.due_date, competencia=body.accounting_period,
             chart_of_accounts_id=body.chart_of_accounts_id,
         )
     )

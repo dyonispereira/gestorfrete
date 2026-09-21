@@ -19,8 +19,11 @@ class AccountsPayableResponse(BaseModel):
     origin: str
     trip_id: uuid.UUID | None
     maintenance_order_id: uuid.UUID | None
+    vehicle_id: uuid.UUID | None
+    driver_id: uuid.UUID | None
     value: Decimal
     due_date: date
+    accounting_period: date
     chart_of_accounts_id: uuid.UUID
     status: str
     audit: AuditMetadataResponse
@@ -29,8 +32,9 @@ class AccountsPayableResponse(BaseModel):
     def from_dto(dto: AccountsPayableDTO) -> "AccountsPayableResponse":
         return AccountsPayableResponse(
             id=dto.id, supplier_id=dto.fornecedor_id, cost_center_id=dto.centro_custo_id, origin=dto.origem,
-            trip_id=dto.viagem_id, maintenance_order_id=dto.ordem_servico_id, value=dto.valor,
-            due_date=dto.data_vencimento, chart_of_accounts_id=dto.plano_contas_id, status=dto.status,
+            trip_id=dto.viagem_id, maintenance_order_id=dto.ordem_servico_id, vehicle_id=dto.veiculo_tracionador_id,
+            driver_id=dto.motorista_id, value=dto.valor, due_date=dto.data_vencimento,
+            accounting_period=dto.competencia, chart_of_accounts_id=dto.plano_contas_id, status=dto.status,
             audit=AuditMetadataResponse(
                 created_at=dto.created_at, created_by=dto.created_by,
                 updated_at=dto.updated_at, updated_by=dto.updated_by,
@@ -76,8 +80,11 @@ class CreateAccountsPayableRequest(BaseModel):
     origin: str
     trip_id: uuid.UUID | None = None
     maintenance_order_id: uuid.UUID | None = None
+    vehicle_id: uuid.UUID | None = None
+    driver_id: uuid.UUID | None = None
     value: Decimal
     due_date: date
+    accounting_period: date
     chart_of_accounts_id: uuid.UUID
 
 

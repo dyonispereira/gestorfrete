@@ -20,6 +20,18 @@ no índice de `README.md` por outro motivo (mesma disciplina de não inflar cont
 `ENTITY_CATALOG.md`/`RBAC_MATRIX.md` — a coincidência numérica com a estimativa original é isso
 mesmo, uma coincidência, não uma correção ao valor estimado).
 
+**Reconciliado (Lote Financeiro, Parte 1)**: duas lacunas reais identificadas antes de implementar
+— **Competência** (período contábil) não existia em nenhuma camada; agora é campo explícito em
+Conta a Pagar e Conta a Receber (nunca inferido de `DATA_VENCIMENTO`/`DATA_EMISSAO` — fundação para
+DRE, fluxo de caixa gerencial e fechamento mensal, ainda que esses indicadores em si continuem
+vivendo em `analytics`, D090). E Conta a Pagar ganha **Veículo Tracionador**/**Motorista** como
+dimensão direta e opcional — decisão deliberadamente assimétrica: Conta a Receber nasce de Fatura →
+Viagem, então veículo/motorista já são deriváveis via Viagem sem duplicar a dimensão; Conta a Pagar
+frequentemente nasce solta (combustível, pedágio, manutenção sem viagem associada), onde não há
+Viagem alguma para derivar de. `MOTORISTA_ID` nunca é herdado automaticamente de uma Viagem
+associada — só é preenchido quando o próprio lançamento é atribuível ao motorista (ex.: multa,
+reembolso), nunca por inferência.
+
 ---
 
 ## Fatura
@@ -79,7 +91,10 @@ mesmo, uma coincidência, não uma correção ao valor estimado).
 - **Invariantes**: soma das parcelas de uma Fatura é igual ao valor total faturado; uma Conta a
   Receber `Conciliada` nunca é editada diretamente (D100) — correção é por Estorno Financeiro.
 - **Regras de negócio associadas**: D019/D020, D098 (Receita Realizada, quando `Recebida`, coexiste
-  com a Receita Prevista da Viagem — nunca a substitui no histórico), D100.
+  com a Receita Prevista da Viagem — nunca a substitui no histórico), D100. **Reconciliado**:
+  `COMPETENCIA` (período contábil, mês/ano) é campo explícito, informado na criação — nunca
+  inferido de `DATA_VENCIMENTO`. Veículo/Motorista **não** são dimensão direta aqui — deriváveis via
+  Fatura → Viagem, sem duplicar (ver nota de reconciliação no topo deste arquivo).
 - **Estados**: `Pendente` / `Vencida` / `Recebida` / `Conciliada` — reflete as mesmas transições de
   `AGUARDANDO_RECEBIMENTO → RECEBIDA` descritas em `005-FINANCEIRO.md`, no nível de cada parcela.
 - **Auditoria**: D007.
@@ -108,13 +123,24 @@ mesmo, uma coincidência, não uma correção ao valor estimado).
 - **Bounded Context proprietário**: `financial`
 - **Principais relacionamentos**: Fornecedor (referenciado); Centro de Custo (referenciado,
   [`001-cadastros.md`](./001-cadastros.md)); Viagem/Ordem de Serviço (referenciados, quando
-  aplicável); Aprovação de Despesa, Rateio de Despesa (filhos do agregado).
+  aplicável); Veículo Tracionador/Motorista (referenciados, quando aplicável — **Reconciliado**,
+  dimensão direta e opcional, ver nota no topo deste arquivo); Aprovação de Despesa, Rateio de
+  Despesa (filhos do agregado).
 - **Eventos que publica**: `ContaAPagarRegistrada`, `ContaAPagarAprovada`, `ContaAPagarRejeitada`,
   `ContaAPagarConciliada` (já catalogados).
 - **Eventos que consome**: `OrdemServicoFechada` (`maintenance`), `AbastecimentoRegistrado`
   (`freight`/`fleet`) — geram Conta a Pagar automaticamente quando o custo se torna devido.
+  **Conectado (Lote Financeiro, Parte 1)**: `OrdemServicoFechada` — só quando a OS fechada tem
+  Fornecedor Executor **e** Centro de Custo preenchidos (ambos NOT NULL nesta tabela); OS 100% mão
+  de obra interna, sem Fornecedor, não gera Conta a Pagar automática — não é uma "conta a pagar" no
+  sentido literal (não há título a pagar a ninguém), fica fora desta automação por decisão, não por
+  limitação. Idempotente: a mesma OS nunca gera duas Contas a Pagar, mesmo se `FECHADA` for
+  reprocessada. `AbastecimentoRegistrado` segue sem consumidor (fora de escopo desta Parte).
 - **Invariantes**: uma Conta a Pagar `Rejeitada` nunca é reaberta — nova Conta a Pagar é lançada,
-  referenciando a anterior; toda Conta a Pagar tem origem explícita (D099).
+  referenciando a anterior; toda Conta a Pagar tem origem explícita (D099). **Reconciliado**:
+  `COMPETENCIA` é campo explícito, informado na criação — nunca inferido de `DATA_VENCIMENTO`.
+  `MOTORISTA_ID` nunca é herdado automaticamente da Viagem associada, mesmo quando `VIAGEM_ID` está
+  preenchido — só setado quando o lançamento é atribuível ao motorista por si só.
 - **Regras de negócio associadas**: D001, D007, D099 (origem obrigatória), D100 (imutável após
   `Conciliada`).
 - **Estados**: `LANCADA` / `AGUARDANDO_APROVACAO` / `APROVADA` / `PAGA` / `CONCILIADA` /

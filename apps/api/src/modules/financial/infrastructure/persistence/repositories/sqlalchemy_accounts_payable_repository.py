@@ -20,8 +20,9 @@ def _to_entity(model: AccountsPayableModel) -> AccountsPayable:
     return AccountsPayable(
         id=model.id, fornecedor_id=model.fornecedor_id, centro_custo_id=model.centro_custo_id,
         origem=PayableOrigin(model.origem), viagem_id=model.viagem_id, ordem_servico_id=model.ordem_servico_id,
-        valor=model.valor, data_vencimento=model.data_vencimento, plano_contas_id=model.plano_contas_id,
-        status=PayableStatus(model.status),
+        veiculo_tracionador_id=model.veiculo_tracionador_id, motorista_id=model.motorista_id,
+        valor=model.valor, data_vencimento=model.data_vencimento, competencia=model.competencia,
+        plano_contas_id=model.plano_contas_id, status=PayableStatus(model.status),
         audit=AuditMetadata(
             created_at=model.criado_em, created_by=model.criado_por, updated_at=model.atualizado_em,
             updated_by=model.atualizado_por, deleted_at=model.excluido_em, deleted_by=model.excluido_por,
@@ -92,8 +93,11 @@ class SqlAlchemyAccountsPayableRepository(AccountsPayableRepository):
         model.origem = aggregate.origem.value
         model.viagem_id = aggregate.viagem_id
         model.ordem_servico_id = aggregate.ordem_servico_id
+        model.veiculo_tracionador_id = aggregate.veiculo_tracionador_id
+        model.motorista_id = aggregate.motorista_id
         model.valor = aggregate.valor
         model.data_vencimento = aggregate.data_vencimento
+        model.competencia = aggregate.competencia
         model.plano_contas_id = aggregate.plano_contas_id
         model.status = aggregate.status.value
         model.criado_em = aggregate.audit.created_at
@@ -106,3 +110,12 @@ class SqlAlchemyAccountsPayableRepository(AccountsPayableRepository):
 
     async def find(self, specification: Specification[AccountsPayable]) -> list[AccountsPayable]:
         raise NotImplementedError("Use list_page — filtros de AccountsPayable são resolvidos via SQL")
+
+    async def exists_for_ordem_servico(self, ordem_servico_id: uuid.UUID) -> bool:
+        tenant_id = get_current_tenant_id()
+        stmt = select(AccountsPayableModel.id).where(
+            AccountsPayableModel.tenant_id == tenant_id,
+            AccountsPayableModel.ordem_servico_id == ordem_servico_id,
+            AccountsPayableModel.excluido_em.is_(None),
+        )
+        return (await self._session.execute(stmt)).first() is not None

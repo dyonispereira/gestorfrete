@@ -25,7 +25,11 @@ _TRANSICOES_VALIDAS: dict[OrdemServicoStatus, frozenset[OrdemServicoStatus]] = {
 
 
 class OrdemServico(BaseAggregateRoot[uuid.UUID]):
-    """`ordens_servico` — Aggregate Root de `maintenance` (`003-MANUTENCAO.md`). `FECHADA` nunca é
+    """`ordens_servico` — Aggregate Root de `maintenance` (`003-MANUTENCAO.md`).
+    `centro_custo_id`/`plano_contas_id` são opcionais (Lote Financeiro, Parte 1) — quando ambos e
+    `fornecedor_executor_id` estão presentes no fechamento, habilitam a Conta a Pagar automática
+    (`006-financeiro.md`); OS sem os três segue fechando normalmente, só sem gerar a Conta a Pagar
+    sozinha. `FECHADA` nunca é
     reaberta — uma recorrência sempre gera uma nova OS referenciando o veículo, nunca reabre esta
     (mesmo princípio de D017/D018 já aplicado a Trip/Cte/Checklist). `AGUARDANDO_PECA` existe no
     enum mas não é alcançável nesta Lote — depende do subsistema de peças, deliberadamente fora de
@@ -57,6 +61,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         data_conclusao: datetime | None,
         hodometro_abertura_km: Decimal | None,
         hodometro_conclusao_km: Decimal | None,
+        centro_custo_id: uuid.UUID | None,
+        plano_contas_id: uuid.UUID | None,
         criado_em: datetime,
         criado_por: uuid.UUID | None,
         atualizado_em: datetime,
@@ -83,6 +89,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         self.data_conclusao = data_conclusao
         self.hodometro_abertura_km = hodometro_abertura_km
         self.hodometro_conclusao_km = hodometro_conclusao_km
+        self.centro_custo_id = centro_custo_id
+        self.plano_contas_id = plano_contas_id
         self.criado_em = criado_em
         self.criado_por = criado_por
         self.atualizado_em = atualizado_em
@@ -99,6 +107,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
         origem_abertura: OrdemServicoOrigemAbertura,
         descricao_problema: str,
         hodometro_abertura_km: Decimal | None,
+        centro_custo_id: uuid.UUID | None,
+        plano_contas_id: uuid.UUID | None,
         criado_por: uuid.UUID | None,
         now: datetime,
     ) -> "OrdemServico":
@@ -110,7 +120,8 @@ class OrdemServico(BaseAggregateRoot[uuid.UUID]):
             causa_raiz=None, diagnostico_tecnico=None, mecanico_id=None, custo_previsto=None,
             custo_realizado=None, necessita_aprovacao=False, evidencia_conclusao_exigida=False,
             status=OrdemServicoStatus.ABERTA, data_inicio_execucao=None, data_conclusao=None,
-            hodometro_abertura_km=hodometro_abertura_km, hodometro_conclusao_km=None, criado_em=now,
+            hodometro_abertura_km=hodometro_abertura_km, hodometro_conclusao_km=None,
+            centro_custo_id=centro_custo_id, plano_contas_id=plano_contas_id, criado_em=now,
             criado_por=criado_por, atualizado_em=now, atualizado_por=criado_por,
         )
 

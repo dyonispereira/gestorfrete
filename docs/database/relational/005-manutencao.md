@@ -15,6 +15,7 @@ deste arquivo já escrito — ver Reconciliações abaixo). As 8 regras de
 | Checklist de Execução | **Modelado agora** (reconciliação, ver `../../domain/004-manutencao.md`) — estava bloqueado por D101/D102 (Domain é a única fonte de entidades) até a entidade `Checklist` ser formalizada no Modelo de Domínio, o que foi feito para desbloquear `AGUARDANDO_CHECKLIST → LIBERADA` em `freight` (gap identificado nos Lotes Operação/Documentos Fiscais). `ordens_servico.origem_abertura` já reservava o valor `CHECKLIST_REPROVADO` desde a rodada anterior — nenhuma migração adicional em `ordens_servico` é necessária, só a FK lógica (sem constraint física, referência polimórfica) |
 | Hodômetro na abertura/conclusão da OS | **Reconciliado** — `ordens_servico` ganha `hodometro_abertura_km`/`hodometro_conclusao_km` (ambos opcionais — nem toda abertura/conclusão tem leitura disponível no momento). Não é um dado novo de posse da OS: cada valor informado também gera uma `leituras_hodometro` real em `fleet` com `origem = 'ORDEM_SERVICO'` (`OdometerOrigin`, D033/D034 — a OS não duplica a posse da Time Series, só denormaliza o valor pontual capturado para exibição rápida). Alimenta o futuro plano de manutenção preventiva por KM (`planos_manutencao_preventiva`, ainda não construída) |
 | Disponibilidade do veículo bloqueada por OS aberta | **Conectado agora** — `VehicleAvailabilityProjector.apply_service_order_opened`/`apply_service_order_closed` (`004-frota.md`, D247) já existiam como scaffolding desde a fundação de `fleet`, sem consumidor real porque `maintenance` não existia. `create_ordem_servico`/`concluir_ordem_servico`/`cancelar_ordem_servico` agora chamam esses métodos (mesmo padrão cross-module de D390/D398): OS `ABERTA` → veículo `EM_MANUTENCAO`; OS `CONCLUIDA` ou `CANCELADA` → veículo `DISPONIVEL` de volta. Nenhuma tabela nova, nenhuma migração em `fleet` |
+| Centro de Custo na OS (Lote Financeiro, Parte 1) | **Reconciliado** — `ordens_servico` ganha `centro_custo_id` opcional. Habilita `OrdemServicoFechada` → Conta a Pagar automática (`006-financeiro.md`) quando presente junto com `fornecedor_executor_id`; OS sem os dois seguem fechando normalmente, só sem gerar a Conta a Pagar sozinha |
 
 ---
 
@@ -116,6 +117,10 @@ CREATE TABLE ordens_servico (
     -- real e imutável vive em `leituras_hodometro` (fleet), origem = 'ORDEM_SERVICO'
     hodometro_abertura_km           NUMERIC(10,2),
     hodometro_conclusao_km          NUMERIC(10,2),
+
+    -- Reconciliado (Lote Financeiro, Parte 1) — opcional; junto com fornecedor_executor_id, habilita
+    -- a Conta a Pagar automática no fechamento (006-financeiro.md)
+    centro_custo_id                 UUID REFERENCES centros_custo(id),
 
     criado_em                       TIMESTAMPTZ NOT NULL DEFAULT now(),
     criado_por                      UUID,

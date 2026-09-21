@@ -23,3 +23,9 @@ class AccountsPayableRepository(Repository[AccountsPayable, uuid.UUID]):
         due_date_from: date | None,
         due_date_to: date | None,
     ) -> tuple[list[AccountsPayable], int]: ...
+
+    @abstractmethod
+    async def exists_for_ordem_servico(self, ordem_servico_id: uuid.UUID) -> bool:
+        """Idempotência da Conta a Pagar automática (`OrdemServicoFechada` → Conta a Pagar, Lote
+        Financeiro Parte 1) — a mesma OS nunca gera duas, mesmo se `FECHADA` for reprocessada."""
+        ...

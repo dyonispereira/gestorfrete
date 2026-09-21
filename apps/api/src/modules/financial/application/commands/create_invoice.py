@@ -53,6 +53,7 @@ _FISCAL_STATUSES_ALLOWING_INVOICE = frozenset(
 class InvoiceInstallmentInput:
     value: Decimal
     due_date: date
+    accounting_period: date
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ class CreateInvoiceHandler(CommandHandler[CreateInvoiceCommand, InvoiceDTO]):
             for index, installment in enumerate(command.installments, start=1):
                 receivable = AccountsReceivable.create(
                     fatura_id=invoice.id, numero_parcela=index, valor=installment.value,
-                    data_vencimento=installment.due_date,
+                    data_vencimento=installment.due_date, competencia=installment.accounting_period,
                 )
                 await receivable_repo.add(receivable)
                 await receivable_history_repo.add(

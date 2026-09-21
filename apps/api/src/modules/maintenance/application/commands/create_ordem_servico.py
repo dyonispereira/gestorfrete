@@ -38,6 +38,8 @@ class CreateOrdemServicoCommand(Command):
     fornecedor_executor_id: uuid.UUID | None = None
     origem_abertura: str = "MANUAL"
     hodometro_abertura_km: Decimal | None = None
+    centro_custo_id: uuid.UUID | None = None
+    plano_contas_id: uuid.UUID | None = None
 
 
 class CreateOrdemServicoHandler(CommandHandler[CreateOrdemServicoCommand, OrdemServicoDTO]):
@@ -66,6 +68,7 @@ class CreateOrdemServicoHandler(CommandHandler[CreateOrdemServicoCommand, OrdemS
                 fornecedor_executor_id=command.fornecedor_executor_id, tipo=OrdemServicoTipo(command.tipo),
                 origem_abertura=OrdemServicoOrigemAbertura(command.origem_abertura),
                 descricao_problema=command.descricao_problema, hodometro_abertura_km=command.hodometro_abertura_km,
+                centro_custo_id=command.centro_custo_id, plano_contas_id=command.plano_contas_id,
                 criado_por=command.actor.user_id, now=now,
             )
             await os_repo.add(ordem_servico)

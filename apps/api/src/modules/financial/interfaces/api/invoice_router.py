@@ -89,7 +89,10 @@ async def create_invoice(
         CreateInvoiceCommand(
             actor=actor, trip_id=body.trip_id, delivery_id=body.delivery_id, client_id=body.client_id,
             total_value=body.total_value, payment_method_id=body.payment_method_id,
-            installments=[InvoiceInstallmentInput(value=i.value, due_date=i.due_date) for i in body.installments],
+            installments=[
+                InvoiceInstallmentInput(value=i.value, due_date=i.due_date, accounting_period=i.accounting_period)
+                for i in body.installments
+            ],
         )
     )
     return InvoiceResponse.from_dto(dto)
@@ -136,7 +139,8 @@ async def create_accounts_receivable(
     handler = CreateAccountsReceivableHandler()
     dto = await handler.handle(
         CreateAccountsReceivableCommand(
-            actor=actor, invoice_id=invoice_id, valor=body.value, data_vencimento=body.due_date
+            actor=actor, invoice_id=invoice_id, valor=body.value, data_vencimento=body.due_date,
+            competencia=body.accounting_period,
         )
     )
     return AccountsReceivableResponse.from_dto(dto)

@@ -29,9 +29,15 @@ from modules.financial.infrastructure.persistence.repositories.sqlalchemy_expens
 from modules.financial.infrastructure.persistence.repositories.sqlalchemy_payable_status_history_repository import (
     SqlAlchemyPayableStatusHistoryRepository,
 )
+from modules.fleet.infrastructure.persistence.repositories.sqlalchemy_vehicle_repository import (
+    SqlAlchemyVehicleRepository,
+)
 from modules.freight.application.trip_internal_transitions import TripInternalTransitions
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_repository import (
     SqlAlchemyTripRepository,
+)
+from modules.drivers.infrastructure.persistence.repositories.sqlalchemy_driver_repository import (
+    SqlAlchemyDriverRepository,
 )
 from modules.maintenance.infrastructure.persistence.repositories.sqlalchemy_supplier_repository import (
     SqlAlchemySupplierRepository,
@@ -49,15 +55,20 @@ class CreateAccountsPayableCommand(Command):
     origem: PayableOrigin
     trip_id: uuid.UUID | None
     maintenance_order_id: uuid.UUID | None
+    vehicle_id: uuid.UUID | None
+    driver_id: uuid.UUID | None
     valor: Decimal
     data_vencimento: date
+    competencia: date
     chart_of_accounts_id: uuid.UUID
 
 
 class CreateAccountsPayableHandler(CommandHandler[CreateAccountsPayableCommand, AccountsPayableDTO]):
     """Auditoria #1 do usuário: quando `origem` tem viagem associada, cria o Rateio automático
     (D393) e atualiza `Trip.custo_realizado` via `TripInternalTransitions` (D390) — soma de **todos**
-    os rateios da viagem, nunca só o valor desta Conta a Pagar isolada."""
+    os rateios da viagem, nunca só o valor desta Conta a Pagar isolada. `competencia` é sempre
+    explícita (Lote Financeiro, Parte 1). `vehicle_id`/`driver_id` são dimensões diretas e opcionais
+    — nunca inferidas de `trip_id`, mesmo quando ambos estão presentes."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -75,6 +86,8 @@ class CreateAccountsPayableHandler(CommandHandler[CreateAccountsPayableCommand, 
             cost_center_repo = SqlAlchemyCostCenterRepository(uow.session)
             chart_repo = SqlAlchemyChartOfAccountsRepository(uow.session)
             trip_repo = SqlAlchemyTripRepository(uow.session)
+            vehicle_repo = SqlAlchemyVehicleRepository(uow.session)
+            driver_repo = SqlAlchemyDriverRepository(uow.session)
 
             if await supplier_repo.get_by_id(command.supplier_id) is None:
                 raise ValidationError("FINANCIAL_UNKNOWN_SUPPLIER_ID", "Fornecedor inexistente.")
@@ -84,12 +97,18 @@ class CreateAccountsPayableHandler(CommandHandler[CreateAccountsPayableCommand, 
                 raise ValidationError("FINANCIAL_UNKNOWN_CHART_OF_ACCOUNTS_ID", "Conta do Plano de Contas inexistente.")
             if command.trip_id is not None and await trip_repo.get_by_id(command.trip_id) is None:
                 raise ValidationError("FINANCIAL_UNKNOWN_TRIP_ID", "Viagem inexistente.")
+            if command.vehicle_id is not None and await vehicle_repo.get_by_id(command.vehicle_id) is None:
+                raise ValidationError("FINANCIAL_UNKNOWN_VEHICLE_ID", "Veículo inexistente.")
+            if command.driver_id is not None and await driver_repo.get_by_id(command.driver_id) is None:
+                raise ValidationError("FINANCIAL_UNKNOWN_DRIVER_ID", "Motorista inexistente.")
 
             now = datetime.now(timezone.utc)
             payable = AccountsPayable.create(
                 fornecedor_id=command.supplier_id, centro_custo_id=command.cost_center_id, origem=command.origem,
-                viagem_id=command.trip_id, ordem_servico_id=command.maintenance_order_id, valor=command.valor,
-                data_vencimento=command.data_vencimento, plano_contas_id=command.chart_of_accounts_id,
+                viagem_id=command.trip_id, ordem_servico_id=command.maintenance_order_id,
+                veiculo_tracionador_id=command.vehicle_id, motorista_id=command.driver_id, valor=command.valor,
+                data_vencimento=command.data_vencimento, competencia=command.competencia,
+                plano_contas_id=command.chart_of_accounts_id,
                 audit=AuditMetadata(
                     created_at=now, created_by=command.actor.user_id, updated_at=now, updated_by=command.actor.user_id
                 ),

@@ -13,8 +13,8 @@ from core.database.orm_base import Base
 
 class AccountsPayableModel(Base):
     """Mapeamento de `contas_pagar`. D391 — ganha o bloco padrão de auditoria, ausente na DDL
-    congelada (que só tinha `criado_em`). `ordem_servico_id` sem FK física (D387 — `maintenance`
-    ainda não implementa Ordem de Serviço)."""
+    congelada (que só tinha `criado_em`). `competencia`/`veiculo_tracionador_id`/`motorista_id`
+    reconciliados no Lote Financeiro, Parte 1 (`006-financeiro.md`)."""
 
     __tablename__ = "contas_pagar"
     __table_args__ = (
@@ -38,9 +38,16 @@ class AccountsPayableModel(Base):
     )
     origem: Mapped[str] = mapped_column(String, nullable=False)
     viagem_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("viagens.id"))
-    ordem_servico_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    ordem_servico_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("ordens_servico.id")
+    )
+    veiculo_tracionador_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("veiculos_tracionadores.id")
+    )
+    motorista_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("motoristas.id"))
     valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
+    competencia: Mapped[date] = mapped_column(Date, nullable=False)
     plano_contas_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("plano_contas.id"), nullable=False
     )

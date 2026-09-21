@@ -31,6 +31,7 @@ class CreateAccountsReceivableCommand(Command):
     invoice_id: uuid.UUID
     valor: Decimal
     data_vencimento: date
+    competencia: date
 
 
 class CreateAccountsReceivableHandler(CommandHandler[CreateAccountsReceivableCommand, AccountsReceivableDTO]):
@@ -58,7 +59,7 @@ class CreateAccountsReceivableHandler(CommandHandler[CreateAccountsReceivableCom
 
             receivable = AccountsReceivable.create(
                 fatura_id=command.invoice_id, numero_parcela=next_installment, valor=command.valor,
-                data_vencimento=command.data_vencimento,
+                data_vencimento=command.data_vencimento, competencia=command.competencia,
             )
             await receivable_repo.add(receivable)
 

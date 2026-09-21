@@ -16,8 +16,8 @@ from modules.financial.infrastructure.persistence.models.accounts_receivable_mod
 def _to_entity(model: AccountsReceivableModel) -> AccountsReceivable:
     return AccountsReceivable(
         id=model.id, fatura_id=model.fatura_id, numero_parcela=model.numero_parcela, valor=model.valor,
-        data_vencimento=model.data_vencimento, data_recebimento=model.data_recebimento,
-        status=ReceivableStatus(model.status),
+        data_vencimento=model.data_vencimento, competencia=model.competencia,
+        data_recebimento=model.data_recebimento, status=ReceivableStatus(model.status),
     )
 
 
@@ -79,6 +79,7 @@ class SqlAlchemyAccountsReceivableRepository(AccountsReceivableRepository):
         model.numero_parcela = receivable.numero_parcela
         model.valor = receivable.valor
         model.data_vencimento = receivable.data_vencimento
+        model.competencia = receivable.competencia
         model.data_recebimento = receivable.data_recebimento
         model.status = receivable.status.value
         await self._session.flush()

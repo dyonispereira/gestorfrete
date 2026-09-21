@@ -40,6 +40,7 @@ class InvoiceInstallmentRequest(BaseModel):
 
     value: Decimal
     due_date: date
+    accounting_period: date
 
 
 class CreateInvoiceRequest(BaseModel):

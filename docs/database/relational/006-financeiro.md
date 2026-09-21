@@ -26,6 +26,8 @@ lote guarda receita/custo/margem de viagem, e nenhuma coluna de `viagens` guarda
 | `centros_resultado` | Não modelado — `Centro de Custo` (`001-cadastros.md`) já cumpre esse papel hoje; nenhuma entidade distinta de "Centro de Resultado" existe em nenhuma categoria do Domain (D101/D102 — não criada aqui só por conveniência) |
 | `contas_bancarias` | **Confirmado como gap real** (D189) — corrigido na origem antes deste arquivo (ver `../domain/006-financeiro.md`) |
 | `posicoes_caixa` ("caso seja materializada futuramente") | Já é uma entidade própria desde `006-financeiro.md` (Sprint 08) — modelada abaixo, não é "futura" |
+| `competencia` em `contas_pagar`/`contas_receber` (Lote Financeiro, Parte 1) | **Reconciliado** — não existia em nenhuma camada; adicionada agora como campo `DATE NOT NULL` explícito em ambas, nunca inferido de `data_vencimento`/`data_emissao`. Fundação para DRE/fluxo de caixa gerencial (`analytics`, D090), sem duplicar o indicador aqui |
+| `veiculo_tracionador_id`/`motorista_id` em `contas_pagar` (Lote Financeiro, Parte 1) | **Reconciliado, só em Contas a Pagar** — Conta a Receber nasce de Fatura → Viagem, então veículo/motorista já são deriváveis sem duplicar a dimensão; Conta a Pagar frequentemente nasce solta (combustível, pedágio, manutenção), sem Viagem para derivar de |
 
 ---
 
@@ -127,6 +129,7 @@ CREATE TABLE contas_receber (
     data_vencimento     DATE NOT NULL,
     data_recebimento    TIMESTAMPTZ,
     status              contas_receber_status_enum NOT NULL DEFAULT 'PENDENTE',
+    competencia         DATE NOT NULL,   -- Reconciliado (Lote Financeiro, Parte 1) — explícito, nunca inferido de data_vencimento
 
     CONSTRAINT uq_contas_receber_fatura_id_parcela UNIQUE (fatura_id, numero_parcela)
     -- imutável após CONCILIADA (D100): reforçado na aplicação
@@ -161,8 +164,11 @@ CREATE TABLE contas_pagar (
     origem              contas_pagar_origem_enum NOT NULL,
     viagem_id           UUID REFERENCES viagens(id),
     ordem_servico_id    UUID REFERENCES ordens_servico(id),
+    veiculo_tracionador_id  UUID REFERENCES veiculos_tracionadores(id),   -- Reconciliado (Lote Financeiro, Parte 1) — dimensão direta, opcional
+    motorista_id        UUID REFERENCES motoristas(id),                  -- Reconciliado — opcional, nunca herdado automaticamente da Viagem
     valor               NUMERIC(14,2) NOT NULL,
     data_vencimento     DATE NOT NULL,
+    competencia         DATE NOT NULL,   -- Reconciliado — explícito, nunca inferido de data_vencimento
     plano_contas_id     UUID NOT NULL REFERENCES plano_contas(id),
     status              contas_pagar_status_enum NOT NULL DEFAULT 'LANCADA',
     criado_em           TIMESTAMPTZ NOT NULL DEFAULT now(),
