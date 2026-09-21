@@ -17,6 +17,10 @@ from modules.documents.application.commands.create_referenced_nfe import (
     CreateReferencedNfeHandler,
 )
 from modules.documents.application.commands.inutilize_cte import InutilizeCteCommand, InutilizeCteHandler
+from modules.documents.application.commands.receive_sefaz_response import (
+    ReceiveSefazResponseCommand,
+    ReceiveSefazResponseHandler,
+)
 from modules.documents.application.commands.sign_cte import SignCteCommand, SignCteHandler
 from modules.documents.application.commands.transmit_cte import TransmitCteCommand, TransmitCteHandler
 from modules.documents.application.commands.validate_cte import ValidateCteCommand, ValidateCteHandler
@@ -112,6 +116,20 @@ async def transmit_cte(
 ) -> CteResponse:
     handler = TransmitCteHandler()
     dto = await handler.handle(TransmitCteCommand(actor=actor, cte_id=cte_id))
+    return CteResponse.from_dto(dto)
+
+
+@router.post("/{cte_id}/commands/receive-sefaz-response", response_model=CteResponse)
+async def receive_sefaz_response(
+    cte_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(require_permission("documents.cte.receive_sefaz_response")),
+) -> CteResponse:
+    """D397, fechado (Lote Fiscal, Parte 2.2) — único caminho HTTP de `TRANSMITIDO` a
+    `AUTORIZADO`/`DENEGADO`. Hoje sempre consulta `SandboxSefazGateway` (simulação determinística,
+    sem integração real com a SEFAZ) — ver `receive_sefaz_response.py`."""
+
+    handler = ReceiveSefazResponseHandler(get_session_factory())
+    dto = await handler.handle(ReceiveSefazResponseCommand(actor=actor, cte_id=cte_id))
     return CteResponse.from_dto(dto)
 
 

@@ -46,6 +46,10 @@ export function useTransmitCteMutation() {
   return useCteCommandMutation(ctesService.transmitCte);
 }
 
+export function useReceiveSefazResponseMutation() {
+  return useCteCommandMutation(ctesService.receiveSefazResponse);
+}
+
 export function useInutilizeCteMutation() {
   return useCteCommandMutation(ctesService.inutilizeCte);
 }

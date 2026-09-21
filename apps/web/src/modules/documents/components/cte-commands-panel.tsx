@@ -9,6 +9,7 @@ import { usePermissions } from "@/core/rbac/permissions-provider";
 import {
   useCancelCteMutation,
   useInutilizeCteMutation,
+  useReceiveSefazResponseMutation,
   useSignCteMutation,
   useTransmitCteMutation,
   useValidateCteMutation,
@@ -20,11 +21,10 @@ import { ApiError } from "@/shared/lib/api-client";
  * transição inválida (`docs/flows/009-FISCAL.md`). Status nunca muda por PATCH: cada botão é um
  * `POST .../commands/<verbo>` (D274). Sem botão de excluir em nenhuma hipótese (D109).
  *
- * Nota (auditoria deste Lote): `TRANSMITIDO→AUTORIZADO/DENEGADO` só existe via o simulador de
- * resposta SEFAZ (`FiscalInternalTransitions`), sem rota HTTP (D397) — hoje, um CT-e criado por
- * esta UI nunca sai de `TRANSMITIDO` sozinho, então "Cancelar" (que exige `AUTORIZADO`) nunca fica
- * clicável neste ambiente. O componente é construído para a máquina de estados completa mesmo
- * assim, mesmo raciocínio já aplicado ao `TripCommandsPanel`.
+ * `TRANSMITIDO→AUTORIZADO/DENEGADO` — Reconciliado (Lote Fiscal, Parte 2.2, D397 fechado): ganhou
+ * rota HTTP real (`commands/receive-sefaz-response`). Nenhuma integração de verdade com a SEFAZ
+ * existe — o resultado vem de um `SandboxSefazGateway` no backend, sempre autoriza. O rótulo do
+ * botão deixa isso explícito, nunca fingindo ser uma resposta real da SEFAZ.
  */
 export function CteCommandsPanel({ cte }: { cte: Cte }) {
   const { hasPermission } = usePermissions();
@@ -34,6 +34,7 @@ export function CteCommandsPanel({ cte }: { cte: Cte }) {
   const validate = useValidateCteMutation();
   const sign = useSignCteMutation();
   const transmit = useTransmitCteMutation();
+  const receiveSefazResponse = useReceiveSefazResponseMutation();
   const inutilize = useInutilizeCteMutation();
   const cancel = useCancelCteMutation();
 
@@ -58,6 +59,7 @@ export function CteCommandsPanel({ cte }: { cte: Cte }) {
   }
 
   const canIssue = hasPermission("documents.cte.issue");
+  const canReceiveSefazResponse = hasPermission("documents.cte.receive_sefaz_response");
   const canCancel = hasPermission("documents.cte.cancel");
 
   const buttons: React.ReactNode[] = [];
@@ -87,6 +89,16 @@ export function CteCommandsPanel({ cte }: { cte: Cte }) {
     buttons.push(
       <Button key="transmit" onClick={() => runSimple(transmit, "CT-e transmitido à SEFAZ.")}>
         Transmitir
+      </Button>
+    );
+  }
+  if (cte.status === "TRANSMITIDO" && canReceiveSefazResponse) {
+    buttons.push(
+      <Button
+        key="receive-sefaz-response" variant="outline"
+        onClick={() => runSimple(receiveSefazResponse, "Resposta da SEFAZ recebida (simulada).")}
+      >
+        Simular resposta SEFAZ
       </Button>
     );
   }

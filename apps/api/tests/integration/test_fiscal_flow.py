@@ -80,6 +80,7 @@ PERMISSION_CATALOG = [
     ("documents.cte.view", "Ver CT-e", "documents"),
     ("documents.cte.issue", "Emitir CT-e", "documents"),
     ("documents.cte.cancel", "Cancelar CT-e", "documents"),
+    ("documents.cte.receive_sefaz_response", "Simular resposta da SEFAZ para CT-e (sandbox)", "documents"),
     ("documents.cte.correct", "Emitir carta de correção", "documents"),
     ("documents.mdfe.view", "Ver MDF-e", "documents"),
     ("documents.mdfe.issue", "Emitir MDF-e", "documents"),
@@ -484,6 +485,42 @@ class TestCteFlow:
 
         denied = await client.get(f"/api/v1/ctes/{cte_id}", headers=headers)
         assert denied.json()["status"] == "DENEGADO"
+
+    async def test_receive_sefaz_response_endpoint_closes_d397_without_sql_or_internal_call(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Lote Fiscal, Parte 2.2 — `POST /ctes/{id}/commands/receive-sefaz-response` é o único
+        caminho HTTP real de `TRANSMITIDO` a `AUTORIZADO`; ao contrário de `_advance_cte_to_authorized`
+        (usado no resto deste arquivo), este teste nunca chama `FiscalInternalTransitions`
+        diretamente nem toca `set_current_tenant_id` — só a API, como um usuário real veria."""
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_and_dispatch_trip(client, headers, tenant_id, category_id)
+        cte = await _get_cte_for_trip(client, headers, trip_id)
+        cte_id = cte["id"]
+
+        # Antes de TRANSMITIDO, a transição é rejeitada — mesma validação de sempre em Cte.authorize().
+        too_early = await client.post(f"/api/v1/ctes/{cte_id}/commands/receive-sefaz-response", headers=headers)
+        assert too_early.status_code == 409, too_early.text
+        assert too_early.json()["error"]["code"] == "FISCAL_CTE_INVALID_TRANSITION"
+
+        await client.post(f"/api/v1/ctes/{cte_id}/commands/validate", headers=headers)
+        await client.post(f"/api/v1/ctes/{cte_id}/commands/sign", headers=headers)
+        await client.post(f"/api/v1/ctes/{cte_id}/commands/transmit", headers=headers)
+
+        response = await client.post(f"/api/v1/ctes/{cte_id}/commands/receive-sefaz-response", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "AUTORIZADO"
+        assert response.json()["access_key"] is not None
+        assert response.json()["access_key"] != "1" * 44  # gerada pelo SandboxSefazGateway, não fixa
+
+        trip_after = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_after.json()["status"]["fiscal"] == "CTE_EMITIDO"
+
+        # Idempotência (D108/D275, já coberta indiretamente por `receive_cte_sefaz_response`) —
+        # reprocessar não é permitido porque o CT-e já não está mais TRANSMITIDO.
+        again = await client.post(f"/api/v1/ctes/{cte_id}/commands/receive-sefaz-response", headers=headers)
+        assert again.status_code == 409
+        assert again.json()["error"]["code"] == "FISCAL_CTE_INVALID_TRANSITION"
 
 
 class TestMdfeFlow:

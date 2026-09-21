@@ -436,6 +436,7 @@ Colunas: Código · Nome · Criticidade · Requer Aprovação · App Motorista (
 |---|---|---|---|---|
 | documents.cte.view | Visualizar CT-e | Baixa | — | |
 | documents.cte.issue | Emitir CT-e | Média | — | |
+| documents.cte.receive_sefaz_response | Simular resposta da SEFAZ para CT-e (sandbox) | Média | — | |
 | documents.cte.cancel | Cancelar CT-e | Alta | Diretor | |
 | documents.cte.correct | Emitir carta de correção | Média | — | |
 | documents.cte.export | Exportar CT-e | Baixa | — | |

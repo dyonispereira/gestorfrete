@@ -1,12 +1,7 @@
-import { execFileSync } from "node:child_process";
-
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const PASSWORD = "Senha123!";
 const CATEGORY_ID = "f14a0000-0000-0000-0000-0000000000c1";
-const CONTAINER = process.env.E2E_POSTGRES_CONTAINER ?? "gestorfrete-postgres-1";
-const DB_USER = process.env.E2E_POSTGRES_USER ?? "gestorfrete";
-const DB_NAME = process.env.E2E_POSTGRES_DB ?? "gestorfrete";
 // `request` (Node-side, no browser) does not go through the Next.js dev server's origin the way
 // `page` does — `apiFetch` in the browser calls `NEXT_PUBLIC_API_URL` directly, so API calls made
 // from `request` need that same absolute backend origin, not the Playwright `baseURL` (the frontend).
@@ -212,31 +207,7 @@ async function allocateAndReleaseTrip(page: Page, driverName: string, plate: str
   await expect(page.getByText("Liberada", { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
-/**
- * `receive_cte_sefaz_response` (`documents/application/fiscal_internal_transitions.py`) — a única
- * transição que leva `Trip.status_fiscal` a `CTE_EMITIDO` — não tem rota HTTP nenhuma (D397,
- * "simula as duas transições genuinamente externas... nenhum método aqui é acionável por HTTP").
- * Não existe caminho real de UI/API para chegar em CT-e Autorizado nesta base — gap herdado da
- * Lote Documentos Fiscais, não desta Lote. Simulação mínima e explícita da resposta SEFAZ, mesmo
- * princípio já usado por `fiscal-seed.sql`/`fiscal.spec.ts` (CT-e Autorizado pré-semeado, nunca
- * alcançado pela UI ali também) — só que aqui incide sobre a Viagem/CT-e criados de verdade pela
- * aplicação neste teste, não uma linha estática.
- */
-function simulateSefazAuthorization(tripId: string, cteId: string) {
-  const suffix = Date.now();
-  const sql = `
-    UPDATE ctes SET status = 'AUTORIZADO', protocolo_sefaz = 'SEFAZ-E2E-${suffix}',
-      chave_acesso = '${suffix.toString().padStart(44, "0")}', xml_arquivo_id = gen_random_uuid(),
-      data_hora_autorizacao = now(), atualizado_em = now()
-    WHERE id = '${cteId}';
-    UPDATE viagens SET status_fiscal = 'CTE_EMITIDO' WHERE id = '${tripId}';
-  `;
-  execFileSync("docker", ["exec", "-i", CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, "-v", "ON_ERROR_STOP=1"], {
-    input: sql, stdio: ["pipe", "inherit", "inherit"],
-  });
-}
-
-test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2)", () => {
+test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
   test("OS fechada gera Conta a Pagar automática → aprovação → pagamento → saldo/status corretos", async ({ page }) => {
     await login(page, "financeiro-admin@e2e-fixture.com");
     const suffix = Date.now();
@@ -402,8 +373,20 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2)", () => {
     await page.getByRole("button", { name: "Registrar canhoto" }).click();
     await expect(page.getByText("Canhoto registrado.")).toBeVisible({ timeout: 10_000 });
 
-    // CT-e Autorizado — sem caminho de UI/API real nesta base (ver `simulateSefazAuthorization`).
-    simulateSefazAuthorization(trip.id, cte.id);
+    // CT-e Autorizado — Lote Fiscal, Parte 2.2 (D397, fechado): rota HTTP real via "Simular
+    // resposta SEFAZ" (SandboxSefazGateway, sempre autoriza), só alcançável depois de
+    // Validar→Assinar→Transmitir (mesma sequência de fiscal.spec.ts). Nenhum SQL de estado de
+    // negócio neste teste — o caminho Viagem→CT-e→Autorizado→Fatura é provado inteiro pela UI.
+    await page.goto(`/ctes/${cte.id}`);
+    await page.getByRole("button", { name: "Validar" }).click();
+    await expect(page.getByText("CT-e validado.")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Assinar" }).click();
+    await expect(page.getByText("CT-e assinado.")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Transmitir" }).click();
+    await expect(page.getByText("CT-e transmitido à SEFAZ.")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Simular resposta SEFAZ" }).click();
+    await expect(page.getByText("Resposta da SEFAZ recebida (simulada).")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Autorizado", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     await page.goto("/faturas");
     await page.getByRole("button", { name: "Nova fatura" }).click();

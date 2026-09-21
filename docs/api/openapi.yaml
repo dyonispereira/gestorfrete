@@ -5568,6 +5568,28 @@ paths:
         "500": { $ref: "#/components/responses/InternalServerError" }
         "502": { description: SEFAZ indisponível }
 
+  /ctes/{id}/commands/receive-sefaz-response:
+    post:
+      tags: [CTe]
+      summary: "TRANSMITIDO → AUTORIZADO/DENEGADO (Reconciliado, Lote Fiscal Parte 2.2 — D397)"
+      description: >
+        Sem corpo de requisição — o resultado vem do SefazGateway (hoje sempre
+        SandboxSefazGateway, simulação determinística; nenhuma integração real com a SEFAZ existe
+        nesta fundação), nunca de um payload do cliente.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Resposta da SEFAZ processada (AUTORIZADO ou DENEGADO)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CTe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
   /ctes/{id}/commands/cancel:
     post:
       tags: [CTe]

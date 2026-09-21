@@ -44,6 +44,13 @@ export default function CteDetailPage() {
       </div>
 
       <CteCommandsPanel cte={cte} />
+      {cte.status === "TRANSMITIDO" ? (
+        <p className="text-sm text-muted-foreground">
+          &quot;Simular resposta SEFAZ&quot; usa um adaptador de sandbox (sempre autoriza) — nenhuma integração real com
+          a SEFAZ existe nesta fundação. O protocolo gerado é identificável (prefixo &quot;SANDBOX-&quot;), nunca um
+          protocolo real.
+        </p>
+      ) : null}
 
       <Tabs defaultValue="visao-geral">
         <TabsList>

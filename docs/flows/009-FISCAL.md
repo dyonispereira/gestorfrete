@@ -55,6 +55,14 @@ perante a SEFAZ. **Cancelamento**, por outro lado, reverte um CT-e que já foi `
 | `AUTORIZADO` | `CANCELADO` | Cancelamento solicitado dentro do prazo legal |
 | `RASCUNHO`/`VALIDADO` | `INUTILIZADO` | Número reservado nunca chega a ser transmitido (falha de sistema, mudança de plano) |
 
+**Reconciliado (Lote Fiscal, Parte 2.2)**: `TRANSMITIDO → AUTORIZADO`/`DENEGADO` ganhou um caminho
+HTTP real (`POST /ctes/{id}/commands/receive-sefaz-response`, `docs/api/039-cte.md`) — sem isso,
+nenhum usuário real conseguia levar uma Viagem até Faturamento (gap identificado no Lote Financeiro,
+Parte 2). Continua sendo, na essência, um evento externo (SEFAZ decide, não o cliente) — só que
+agora simulado por um `SefazGateway` sandbox em vez de inacessível por completo. O equivalente para
+MDF-e (`PENDENTE → AUTORIZADO`, linha abaixo) **não** ganhou o mesmo tratamento nesta Parte — mesmo
+gap, ainda sem rota HTTP, fora do pedido original.
+
 ### Transições inválidas (normativas)
 
 - **Não é permitido** cancelar um CT-e (`→ CANCELADO`) fora do prazo legal de cancelamento — após

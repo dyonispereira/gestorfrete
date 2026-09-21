@@ -41,6 +41,15 @@ export function transmitCte(id: string): Promise<Cte> {
   return apiFetch<Cte>(`/ctes/${id}/commands/transmit`, { method: "POST" });
 }
 
+/**
+ * D397, fechado (Lote Fiscal, Parte 2.2) — único caminho HTTP real de TRANSMITIDO a
+ * AUTORIZADO/DENEGADO. Sem corpo: o resultado vem do SefazGateway no backend (hoje sempre
+ * SandboxSefazGateway — nenhuma integração real com a SEFAZ existe), nunca de um payload daqui.
+ */
+export function receiveSefazResponse(id: string): Promise<Cte> {
+  return apiFetch<Cte>(`/ctes/${id}/commands/receive-sefaz-response`, { method: "POST" });
+}
+
 export function inutilizeCte(id: string): Promise<Cte> {
   return apiFetch<Cte>(`/ctes/${id}/commands/inutilize`, { method: "POST" });
 }

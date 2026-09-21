@@ -31,10 +31,17 @@ from modules.freight.domain.value_objects.trip_fiscal_status import TripFiscalSt
 
 
 class FiscalInternalTransitions:
-    """D397 — simula as duas transições genuinamente externas deste lote (resposta assíncrona da
-    SEFAZ): CT-e `TRANSMITIDO→AUTORIZADO`/`DENEGADO` e MDF-e `PENDENTE→AUTORIZADO`. Nenhum método
-    aqui é acionável por HTTP — mesmo padrão de `TripInternalTransitions` (D376). Testes chamam estes
-    métodos diretamente para simular a resposta e exercitar o restante da máquina de estados."""
+    """D397 — as duas transições genuinamente externas deste lote (resposta assíncrona da SEFAZ):
+    CT-e `TRANSMITIDO→AUTORIZADO`/`DENEGADO` e MDF-e `PENDENTE→AUTORIZADO`.
+
+    **Reconciliado (Lote Fiscal, Parte 2.2)**: `receive_cte_sefaz_response` agora É acionável por
+    HTTP — via `POST /ctes/{id}/commands/receive-sefaz-response`
+    (`ReceiveSefazResponseHandler`/`SefazGateway`), que consulta um gateway (hoje sempre
+    `SandboxSefazGateway`, simulação determinística — nenhuma integração real com a SEFAZ existe)
+    e repassa o resultado para este método, que continua concentrando toda a lógica de domínio
+    (histórico, Evento Fiscal, sincronização de `Trip.status_fiscal`). `receive_mdfe_sefaz_response`
+    segue sem equivalente HTTP — mesmo gap, não fechado nesta Parte (fora do pedido original, que
+    era especificamente sobre o caminho Viagem→CT-e→Fatura)."""
 
     async def receive_cte_sefaz_response(
         self,

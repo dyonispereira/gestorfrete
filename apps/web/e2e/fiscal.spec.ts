@@ -29,13 +29,17 @@ async function login(page: Page, email: string) {
  * arquivos em sequência, e aqui cada teste consome o estado deixado pelo anterior no mesmo CT-e
  * semeado — não são independentes entre si como nos Lotes anteriores, de propósito, para não
  * precisar semear uma dúzia de CT-e só para isolar cada cenário.
+ *
+ * `TRANSMITIDO → AUTORIZADO`/`DENEGADO` — Reconciliado (Lote Fiscal, Parte 2.2, D397 fechado):
+ * ganhou rota HTTP real (`commands/receive-sefaz-response`, `SandboxSefazGateway`). O primeiro
+ * teste abaixo agora avança até lá, em vez de parar em `TRANSMITIDO`.
  */
 test.describe("Sprint 14 — Frontend, Lote Documentos Fiscais", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "fiscal-admin@e2e-fixture.com");
   });
 
-  test("CT-e: validar → assinar → transmitir, sem Cancelar disponível", async ({ page }) => {
+  test("CT-e: validar → assinar → transmitir → simular resposta SEFAZ → Cancelar liberado", async ({ page }) => {
     await page.goto(`/ctes/${CTE_RASCUNHO_ID}`);
     await expect(page.getByText("Rascunho", { exact: true })).toBeVisible();
 
@@ -51,9 +55,29 @@ test.describe("Sprint 14 — Frontend, Lote Documentos Fiscais", () => {
     await expect(page.getByText("CT-e transmitido à SEFAZ.")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Transmitido", { exact: true })).toBeVisible();
 
-    // AUTORIZADO/DENEGADO só chegam pelo simulador de resposta SEFAZ (D397) — sem rota HTTP, então
-    // "Cancelar" (que exige AUTORIZADO) nunca aparece aqui.
+    // Antes de TRANSMITIDO, "Simular resposta SEFAZ" nunca aparece — só "Cancelar" exige
+    // AUTORIZADO, mas o botão de simulação em si só existe em TRANSMITIDO (gate correto).
     await expect(page.getByRole("button", { name: "Cancelar" })).toHaveCount(0);
+
+    // D397, fechado (Lote Fiscal, Parte 2.2) — rota HTTP real, SandboxSefazGateway sempre autoriza.
+    await page.getByRole("button", { name: "Simular resposta SEFAZ" }).click();
+    await expect(page.getByText("Resposta da SEFAZ recebida (simulada).")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Autorizado", { exact: true })).toBeVisible();
+
+    // Só agora, com AUTORIZADO de verdade, "Cancelar" aparece — e "Simular resposta SEFAZ" some
+    // (não é mais TRANSMITIDO).
+    await expect(page.getByRole("button", { name: "Cancelar" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Simular resposta SEFAZ" })).toHaveCount(0);
+
+    // Cancela também este CT-e (1001) — sem isso, ele ficaria AUTORIZADO permanentemente e
+    // quebraria a premissa do teste de MDF-e mais abaixo ("nenhum CT-e Autorizado disponível" só é
+    // genuíno se todos os três CT-e semeados desta viagem — 1001/1002/1003 — não estiverem mais
+    // AUTORIZADO ao final deste arquivo).
+    await page.getByRole("button", { name: "Cancelar" }).click();
+    await page.fill("#cte-cancel-notes", "Cancelado ao final do teste — não deixar AUTORIZADO permanente.");
+    await page.getByRole("button", { name: "Cancelar CT-e" }).click();
+    await expect(page.getByText("CT-e cancelado.")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Cancelado", { exact: true })).toBeVisible();
   });
 
   test("CT-e: inutilizar a partir de Rascunho vira estado terminal, sem mais comandos", async ({ page }) => {
@@ -131,8 +155,10 @@ test.describe("Sprint 14 — Frontend, Lote Documentos Fiscais", () => {
   });
 
   test("MDF-e: sem CT-e Autorizado disponível, formulário genuinamente bloqueado", async ({ page }) => {
-    // Depois do teste anterior, o único CT-e AUTORIZADO da viagem (1003) virou CANCELADO — nenhum
-    // CT-e Autorizado sobra para consolidar, um bloqueio real do picker, não um cenário fabricado.
+    // Dos três CT-e semeados nesta viagem: 1001 foi autorizado e cancelado no primeiro teste deste
+    // arquivo (Reconciliado, Lote Fiscal Parte 2.2), 1002 foi inutilizado, 1003 foi autorizado e
+    // cancelado no teste de Carta de Correção — nenhum CT-e Autorizado sobra para consolidar, um
+    // bloqueio real do picker, não um cenário fabricado.
     await page.goto("/mdfes");
     await page.getByRole("button", { name: "Novo MDF-e" }).click();
 
@@ -159,9 +185,16 @@ test.describe("Sprint 14 — Frontend, Lote Documentos Fiscais", () => {
     await expect(page.getByRole("button", { name: /^Salvar/ })).toHaveCount(0);
   });
 
-  test("Eventos Fiscais: somente leitura, genuinamente vazio neste ambiente", async ({ page }) => {
+  test("Eventos Fiscais: somente leitura, mostra o evento real da simulação SEFAZ deste arquivo", async ({ page }) => {
+    // Reconciliado (Lote Fiscal, Parte 2.2) — antes deste Lote, "Simular resposta SEFAZ" não tinha
+    // rota HTTP, então esta lista ficava genuinamente vazia em todo ambiente de teste. O primeiro
+    // teste deste arquivo agora aciona `commands/receive-sefaz-response`, que grava um Evento
+    // Fiscal real (RESPOSTA/SUCESSO) — a lista deixa de estar vazia porque o gap foi fechado, não
+    // porque o teste passou a inventar dado.
     await page.goto("/eventos-fiscais");
-    await expect(page.getByText("Nenhum evento fiscal registrado")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("row").filter({ hasText: "RESPOSTA" }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("SUCESSO").first()).toBeVisible();
+    // 100% somente leitura mesmo com dado real presente — nenhum botão de ação na tabela.
     await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
   });
 });

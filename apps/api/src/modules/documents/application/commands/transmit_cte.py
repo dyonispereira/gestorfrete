@@ -27,8 +27,10 @@ class TransmitCteCommand(Command):
 
 class TransmitCteHandler(CommandHandler[TransmitCteCommand, CteDTO]):
     """`ASSINADO→TRANSMITIDO`. A resposta (`AUTORIZADO`/`DENEGADO`) chega depois, de forma
-    assíncrona, via `FiscalInternalTransitions.receive_cte_sefaz_response` (D397) — este comando só
-    reflete o que já é conhecido no momento da resposta HTTP (D238)."""
+    assíncrona, via `POST /ctes/{id}/commands/receive-sefaz-response`
+    (`FiscalInternalTransitions.receive_cte_sefaz_response`, D397, Reconciliado na Parte 2.2 — hoje
+    simulada por `SandboxSefazGateway`) — este comando só reflete o que já é conhecido no momento da
+    resposta HTTP (D238)."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()

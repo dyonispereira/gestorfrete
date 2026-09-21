@@ -50,7 +50,11 @@ documento fiscal individual vivem exclusivamente aqui, de posse de `documents` (
   `analytics`, D090 — aqui só o dado bruto).
 - **Documentos canônicos relacionados**: `009-FISCAL.md`.
 - **Evoluções futuras previstas**: emissão em modo de contingência quando a SEFAZ estiver
-  indisponível.
+  indisponível; **Reconciliado (Lote Fiscal, Parte 2.2)** — provider real de emissão junto à SEFAZ
+  (certificado digital, cliente SOAP/REST, assinatura XML), quando existir; `SefazGateway`
+  (`modules/documents/domain/gateways`) já isola essa fronteira, hoje só com `SandboxSefazGateway`
+  (simulação determinística, sem integração real) — trocar pelo provider real não toca
+  `domain`/`application`.
 - **Dependências obrigatórias**: Viagem.
 - **Dependências proibidas**: Cliente diretamente (acessa via Viagem), Ordem de Serviço, Pneu.
 - **Dono da Timeline**: Aggregate Viagem (o CT-e contribui à timeline da Viagem, não tem timeline
