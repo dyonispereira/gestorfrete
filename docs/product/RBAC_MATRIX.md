@@ -489,6 +489,9 @@ Colunas: Código · Nome · Criticidade · Requer Aprovação · App Motorista (
 | financial.chart_of_accounts.create | Criar conta do plano de contas | Média | — | |
 | financial.chart_of_accounts.edit | Editar conta do plano de contas | Média | — | |
 | financial.chart_of_accounts.delete | Excluir conta do plano de contas | Média | — | |
+| financial.payment_method.view | Visualizar forma de pagamento | Baixa | — | |
+| financial.payment_method.create | Criar forma de pagamento | Média | — | |
+| financial.payment_method.edit | Editar forma de pagamento | Média | — | |
 | financial.bank_account.view | Visualizar conta bancária | Média | — | |
 | financial.bank_account.create | Criar conta bancária | Alta | Financeiro | |
 | financial.bank_account.edit | Editar conta bancária | Alta | Financeiro | |

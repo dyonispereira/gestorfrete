@@ -82,4 +82,7 @@ class CreateFinancialReversalHandler(CommandHandler[CreateFinancialReversalComma
 
             await uow.commit()
 
-        return FinancialReversalDTO.from_entity(reversal)
+        # `criado_por` vem direto do actor que acabou de executar o comando — sem precisar
+        # reconsultar `logs_auditoria` (isso só é necessário em `Get`/`List`, que leem um Estorno
+        # já existente sem ter o actor original em mãos).
+        return FinancialReversalDTO.from_entity(reversal, criado_por=command.actor.user_id)

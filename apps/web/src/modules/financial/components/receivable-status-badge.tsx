@@ -4,6 +4,7 @@ import type { ReceivableStatus } from "@gestorfrete/types";
 const VARIANT_BY_STATUS: Record<ReceivableStatus, "outline" | "warning" | "success" | "secondary"> = {
   PENDENTE: "outline",
   VENCIDA: "warning",
+  PARCIALMENTE_RECEBIDO: "secondary",
   RECEBIDA: "success",
   CONCILIADA: "success",
 };
@@ -11,6 +12,7 @@ const VARIANT_BY_STATUS: Record<ReceivableStatus, "outline" | "warning" | "succe
 const LABEL_BY_STATUS: Record<ReceivableStatus, string> = {
   PENDENTE: "Pendente",
   VENCIDA: "Vencida",
+  PARCIALMENTE_RECEBIDO: "Parcialmente recebida",
   RECEBIDA: "Recebida",
   CONCILIADA: "Conciliada",
 };

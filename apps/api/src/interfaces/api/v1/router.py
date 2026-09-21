@@ -21,11 +21,13 @@ from modules.documents.interfaces.api.fiscal_event_router import router as fisca
 from modules.documents.interfaces.api.mdfe_router import router as mdfe_router
 from modules.drivers.interfaces.api.driver_router import router as driver_router
 from modules.financial.interfaces.api.accounts_payable_router import router as accounts_payable_router
+from modules.financial.interfaces.api.accounts_receivable_router import router as accounts_receivable_router
 from modules.financial.interfaces.api.bank_account_router import router as bank_account_router
 from modules.financial.interfaces.api.chart_of_accounts_router import router as chart_of_accounts_router
 from modules.financial.interfaces.api.cost_center_router import router as cost_center_router
 from modules.financial.interfaces.api.financial_reversal_router import router as financial_reversal_router
 from modules.financial.interfaces.api.invoice_router import router as invoice_router
+from modules.financial.interfaces.api.payment_method_router import router as payment_method_router
 from modules.fleet.interfaces.api.implement_router import router as implement_router
 from modules.freight.interfaces.api.delivery_router import router as delivery_router
 from modules.freight.interfaces.api.occurrence_router import router as occurrence_router
@@ -122,7 +124,9 @@ api_router_v1.include_router(trip_financials_router)
 api_router_v1.include_router(chart_of_accounts_router)
 api_router_v1.include_router(bank_account_router)
 api_router_v1.include_router(accounts_payable_router)
+api_router_v1.include_router(accounts_receivable_router)
 api_router_v1.include_router(invoice_router)
+api_router_v1.include_router(payment_method_router)
 api_router_v1.include_router(financial_reversal_router)
 
 # Sprint 11, Lote 7 — Fiscal (D396-D400). Sem colisão de rota: `ctes`/`mdfes`/`ciots`/

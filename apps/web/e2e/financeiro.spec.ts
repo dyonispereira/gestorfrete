@@ -4,7 +4,6 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 const PASSWORD = "Senha123!";
 const CATEGORY_ID = "f14a0000-0000-0000-0000-0000000000c1";
-const PAYMENT_METHOD_ID = "f14a0000-0000-0000-0000-0000000000f1";
 const CONTAINER = process.env.E2E_POSTGRES_CONTAINER ?? "gestorfrete-postgres-1";
 const DB_USER = process.env.E2E_POSTGRES_USER ?? "gestorfrete";
 const DB_NAME = process.env.E2E_POSTGRES_DB ?? "gestorfrete";
@@ -412,7 +411,8 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2)", () => {
     await page.getByRole("option", { name: clientName }).click();
     await page.getByLabel("Viagem").click();
     await page.getByRole("option", { name: new RegExp("^VG-") }).click();
-    await page.fill("#invoice-payment-method", PAYMENT_METHOD_ID);
+    await page.getByLabel("Forma de pagamento").click();
+    await page.getByRole("option", { name: "PIX" }).click();
     await page.fill("#installment-value-0", "600");
     await page.fill("#installment-due-0", "2026-12-01");
     await page.fill("#installment-competencia-0", "2026-12-01");
@@ -433,18 +433,81 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2)", () => {
     // qualquer baixa) — `.first()` só confirma presença, não unicidade.
     await expect(page.getByText("R$ 1.000,00").first()).toBeVisible({ timeout: 10_000 });
 
-    // Baixa parcial: confirma só a primeira parcela — saldo remanescente visível e correto.
+    // Baixa parcial real de UMA parcela isolada (Lote Financeiro, Parte 2.1) — a parcela de R$ 600
+    // recebe R$ 300 e permanece com R$ 300 em aberto, sem virar Recebida. `Valor` (600) nunca muda
+    // ao longo do fluxo — filtro estável pela linha mesmo depois do status/saldo mudarem.
     const rows = page.getByRole("row");
-    await rows.filter({ hasText: "R$ 600,00" }).getByRole("button", { name: "Confirmar recebimento" }).click();
-    await expect(page.getByText("Recebimento confirmado.")).toBeVisible({ timeout: 10_000 });
-    // "R$ 400,00" aparece tanto no card de Saldo quanto na célula Valor da parcela 2 pendente —
-    // a segunda é prova suficiente de saldo remanescente correto, sem ambiguidade de locator.
-    await expect(rows.filter({ hasText: "R$ 400,00" })).toBeVisible({ timeout: 10_000 });
+    const firstInstallmentRow = rows.filter({ hasText: "R$ 600,00" });
+    await firstInstallmentRow.getByRole("button", { name: "Confirmar recebimento" }).click();
+    const paymentDialog = page.getByRole("dialog");
+    await paymentDialog.getByLabel("Valor recebido").fill("300");
+    await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    await expect(firstInstallmentRow.getByText("Parcialmente recebida")).toBeVisible({ timeout: 10_000 });
+    // "R$ 300,00" aparece nas colunas Recebido E Saldo dessa linha (300 de 600, metade) — `.first()`
+    // só confirma presença, a igualdade recebido==saldo aqui já é a prova de que a baixa foi parcial.
+    await expect(firstInstallmentRow.getByRole("cell", { name: "R$ 300,00" }).first()).toBeVisible();
 
-    // Baixa final: confirma a segunda parcela — saldo some, Fatura 100% recebida.
+    // Saldo remanescente → baixa final da MESMA parcela: os R$ 300 restantes, respeitando o
+    // invariante `0 < valor <= saldo em aberto` (o input já vem pré-preenchido com o saldo).
+    await firstInstallmentRow.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(paymentDialog.getByLabel("Valor recebido")).toHaveValue("300.00");
+    await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    await expect(firstInstallmentRow.getByText("Recebida", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    // Segunda parcela: baixa total em uma única chamada — cobre o caminho "de sempre" ao lado do novo.
     await rows.filter({ hasText: "R$ 400,00" }).getByRole("button", { name: "Confirmar recebimento" }).click();
-    await expect(page.getByText("Recebimento confirmado.")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("R$ 0,00")).toBeVisible({ timeout: 10_000 });
+    await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    // "R$ 0,00" agora aparece no card de Saldo E na coluna Saldo de cada parcela — `.first()` só
+    // confirma presença.
+    await expect(page.getByText("R$ 0,00").first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("button", { name: "Confirmar recebimento" })).toHaveCount(0);
+  });
+
+  test("Estorno mostra quem registrou — resolvido via logs_auditoria, sem duplicar coluna", async ({ page }) => {
+    await login(page, "financeiro-admin@e2e-fixture.com");
+    const suffix = Date.now();
+    const supplierName = `Fornecedor Estorno E2E ${suffix}`;
+    const costCenterName = `Centro Estorno E2E ${suffix}`;
+    const chartName = `Conta Estorno E2E ${suffix}`;
+
+    await createSupplier(page, supplierName);
+    await createCostCenter(page, costCenterName);
+    await createChartOfAccounts(page, chartName);
+
+    await page.goto("/contas-pagar");
+    await page.getByRole("button", { name: "Nova conta a pagar" }).click();
+    await page.getByLabel("Fornecedor").click();
+    await page.getByRole("option", { name: supplierName }).click();
+    await page.getByLabel("Centro de custo").click();
+    await page.getByRole("option", { name: costCenterName }).click();
+    await page.getByLabel("Plano de contas").click();
+    await page.getByRole("option", { name: new RegExp(chartName) }).click();
+    await page.fill("#payable-value", "80.00");
+    await page.fill("#payable-due-date", "2026-11-01");
+    await page.fill("#payable-competencia", "2026-11-01");
+    const [payableResponse] = await Promise.all([
+      page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/contas-pagar")),
+      page.getByRole("button", { name: "Criar conta a pagar" }).click(),
+    ]);
+    await expect(page.getByText("Conta a pagar criada.")).toBeVisible({ timeout: 10_000 });
+    const payable = (await payableResponse.json()) as { id: string };
+
+    await page.goto("/estornos-financeiros");
+    await page.getByRole("button", { name: "Novo estorno" }).click();
+    // Tipo de lançamento já nasce em "Conta a Pagar" (default do formulário).
+    await page.fill("#reversal-target-id", payable.id);
+    await page.fill("#reversal-value", "80.00");
+    await page.fill("#reversal-reason", "Lançamento duplicado por engano — estornando para corrigir.");
+    await page.getByRole("button", { name: "Registrar estorno" }).click();
+    await expect(page.getByText("Estorno registrado.")).toBeVisible({ timeout: 10_000 });
+
+    // `created_by` é resolvido via logs_auditoria (Lote Financeiro, Parte 2.1) — o admin fixture
+    // ganhou identity_access.user.view só para este teste provar o nome de verdade, não um UUID cru.
+    // Escopo em `main` porque "E2E Financeiro Admin" também aparece no botão do usuário no header.
+    await expect(page.locator("main").getByText("E2E Financeiro Admin")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Lançamento duplicado por engano")).toBeVisible();
   });
 });

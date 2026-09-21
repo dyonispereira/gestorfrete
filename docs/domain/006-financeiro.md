@@ -90,13 +90,27 @@ reembolso), nunca por inferência.
 - **Eventos que consome**: Nenhum.
 - **Invariantes**: soma das parcelas de uma Fatura é igual ao valor total faturado; uma Conta a
   Receber `Conciliada` nunca é editada diretamente (D100) — correção é por Estorno Financeiro.
+  **Reconciliado (Lote Financeiro, Parte 2.1)**: `0 < valor da baixa <= saldo em aberto`
+  (`VALOR - VALOR_RECEBIDO`) em toda chamada de baixa — nunca um valor negativo, zero, ou maior que
+  o saldo restante.
 - **Regras de negócio associadas**: D019/D020, D098 (Receita Realizada, quando `Recebida`, coexiste
   com a Receita Prevista da Viagem — nunca a substitui no histórico), D100. **Reconciliado**:
   `COMPETENCIA` (período contábil, mês/ano) é campo explícito, informado na criação — nunca
   inferido de `DATA_VENCIMENTO`. Veículo/Motorista **não** são dimensão direta aqui — deriváveis via
   Fatura → Viagem, sem duplicar (ver nota de reconciliação no topo deste arquivo).
-- **Estados**: `Pendente` / `Vencida` / `Recebida` / `Conciliada` — reflete as mesmas transições de
-  `AGUARDANDO_RECEBIMENTO → RECEBIDA` descritas em `005-FINANCEIRO.md`, no nível de cada parcela.
+- **Estados**: `Pendente` / `Vencida` / `Parcialmente Recebida` / `Recebida` / `Conciliada` — reflete
+  as mesmas transições de `AGUARDANDO_RECEBIMENTO → RECEBIDA` descritas em `005-FINANCEIRO.md`, no
+  nível de cada parcela. **Reconciliado (Lote Financeiro, Parte 2.1)**: `Parcialmente Recebida` é
+  um estado novo, não documentado até aqui — o desenho original tratava "recebimento parcial"
+  como resolvido inteiramente pelo parcelamento (N Contas a Receber por Fatura, cada uma binária:
+  recebida ou não). Isso deixava de cobrir o caso real de uma ÚNICA parcela ser paga em partes
+  (ex.: cliente paga R$ 4.000 de uma parcela de R$ 10.000 e promete o restante depois) — gap
+  identificado a partir de uso real do Faturamento, não antecipado no desenho original. `Parcialmente
+  Recebida` nunca é rebaixada para `Vencida` mesmo com `DATA_VENCIMENTO` passada — já existe
+  progresso real registrado (`VALOR_RECEBIDO > 0`), e "vencida" esconderia isso. `Conciliada` só é
+  alcançável a partir de `Recebida` (saldo zerado) — uma parcela parcialmente recebida nunca concilia
+  parcialmente, mesmo tratamento de imutabilidade/D100 já aplicado ao resto do ciclo. Decisão de V1,
+  revisitável se o negócio precisar de conciliação bancária parcial no futuro.
 - **Auditoria**: D007.
 - **Linha do tempo**: parte da Fatura/Viagem.
 - **Anexos suportados**: comprovante de recebimento (D024).

@@ -21,6 +21,10 @@ qualquer aprovação", que é a intenção mais próxima de "cancelar" que o dom
 **Query parameters**: `page`/`limit`, `search` (nenhum campo de texto livre óbvio — omitido),
 `status`, `origin` (`origem`), `supplier_id` (`fornecedor_id`), `cost_center_id`
 (`centro_custo_id`), `trip_id` (`viagem_id`), `due_date__gte`/`__lte` (`data_vencimento`).
+**Reconciliado (Lote Financeiro, Parte 2.1)**: `vehicle_id` (`veiculo_tracionador_id`),
+`chart_of_accounts_id` (`plano_contas_id`), `accounting_period` (`competencia`, igualdade exata —
+sempre o primeiro dia do mês, mesma convenção da criação) — as três dimensões formalizadas na
+Parte 1 estavam gravadas mas não eram consultáveis; gap fechado aqui, sem endpoint novo.
 
 **Responses**: `200` (`Pagination` de `AccountsPayable`, `financial-schemas.md`), `401`, `403`,
 `500`.

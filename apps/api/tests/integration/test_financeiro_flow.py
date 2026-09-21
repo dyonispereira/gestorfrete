@@ -855,6 +855,74 @@ class TestInvoiceAndReceivableFlow:
         assert cancel_again.status_code == 409
         assert cancel_again.json()["error"]["code"] == "FINANCIAL_INVOICE_INVALID_STATUS"
 
+    async def test_partial_receipt_leaves_balance_open_then_completes_and_rejects_invalid_amounts(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Lote Financeiro, Parte 2.1 — baixa parcial real de UMA parcela isolada, distinta do
+        parcelamento já coberto acima. `0 < received_value <= saldo_aberto` é o invariante pedido."""
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        trip_id, _ = await _prepare_invoiceable_trip(client, headers, tenant_id, category_id)
+        client_id_resp = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        client_id = client_id_resp.json()["references"]["client_id"]
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+        invoice_id = create_invoice.json()["id"]
+        receivables = await client.get(f"/api/v1/faturas/{invoice_id}/contas-receber", headers=headers)
+        receivable_id = receivables.json()["data"][0]["id"]
+
+        confirm_url = f"/api/v1/faturas/{invoice_id}/contas-receber/{receivable_id}/commands/confirm-receipt"
+
+        over_balance = await client.post(confirm_url, headers=headers, json={"received_value": "1000.01"})
+        assert over_balance.status_code == 409, over_balance.text
+        assert over_balance.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_PAYMENT_VALUE"
+
+        zero_value = await client.post(confirm_url, headers=headers, json={"received_value": "0.00"})
+        assert zero_value.status_code == 409, zero_value.text
+        assert zero_value.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_PAYMENT_VALUE"
+
+        first_partial = await client.post(confirm_url, headers=headers, json={"received_value": "400.00"})
+        assert first_partial.status_code == 200, first_partial.text
+        assert first_partial.json()["status"] == "PARCIALMENTE_RECEBIDO"
+        assert first_partial.json()["received_value"] == "400.00"
+        assert first_partial.json()["open_balance"] == "600.00"
+        assert first_partial.json()["received_at"] is None  # só quando o saldo zera
+
+        # Fatura da Viagem ainda não pode estar RECEBIDA — saldo em aberto na única parcela.
+        trip_mid = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_mid.json()["status"]["financial"] == "FATURADA"
+
+        over_remaining_balance = await client.post(confirm_url, headers=headers, json={"received_value": "600.01"})
+        assert over_remaining_balance.status_code == 409, over_remaining_balance.text
+        assert over_remaining_balance.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_PAYMENT_VALUE"
+
+        second_partial = await client.post(confirm_url, headers=headers, json={"received_value": "300.00"})
+        assert second_partial.status_code == 200, second_partial.text
+        assert second_partial.json()["status"] == "PARCIALMENTE_RECEBIDO"
+        assert second_partial.json()["received_value"] == "700.00"
+        assert second_partial.json()["open_balance"] == "300.00"
+
+        final_payment = await client.post(confirm_url, headers=headers, json={"received_value": "300.00"})
+        assert final_payment.status_code == 200, final_payment.text
+        assert final_payment.json()["status"] == "RECEBIDA"
+        assert final_payment.json()["open_balance"] == "0.00"
+        assert final_payment.json()["received_at"] is not None
+
+        trip_final = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_final.json()["status"]["financial"] == "RECEBIDA"
+
+        already_received = await client.post(confirm_url, headers=headers, json={"received_value": "1.00"})
+        assert already_received.status_code == 409, already_received.text
+        assert already_received.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_TRANSITION"
+
 
 class TestFinancialReversalFlow:
     async def test_target_mismatch_and_not_found(
@@ -884,6 +952,47 @@ class TestFinancialReversalFlow:
         )
         assert nonexistent_target.status_code == 404
         assert nonexistent_target.json()["error"]["code"] == "FINANCIAL_REVERSAL_TARGET_NOT_FOUND"
+
+    async def test_created_by_resolved_from_audit_trail_not_a_duplicated_column(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Lote Financeiro, Parte 2.1 — `FinancialReversal` nunca ganhou `ator_id` próprio (D266
+        mantido); `created_by` é resolvido lendo `logs_auditoria` (`AuditTrailReader`), que já
+        capturava isso desde sempre via `AuditLogger.record(acao="CRIACAO", ator_id=...)`."""
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        supplier_id = await _create_supplier(client, headers)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+
+        payable = await client.post(
+            "/api/v1/contas-pagar", headers=headers,
+            json={
+                "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
+                "value": "50.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01",
+                "chart_of_accounts_id": chart_id,
+            },
+        )
+        assert payable.status_code == 201, payable.text
+        payable_id = payable.json()["id"]
+
+        create_reversal = await client.post(
+            "/api/v1/estornos-financeiros", headers=headers,
+            json={"accounts_payable_id": payable_id, "value": "50.00", "reason": "Valor lançado em duplicidade"},
+        )
+        assert create_reversal.status_code == 201, create_reversal.text
+        reversal_id = create_reversal.json()["id"]
+        assert create_reversal.json()["created_by"] is not None
+        created_by = create_reversal.json()["created_by"]
+
+        get_reversal = await client.get(f"/api/v1/estornos-financeiros/{reversal_id}", headers=headers)
+        assert get_reversal.status_code == 200
+        assert get_reversal.json()["created_by"] == created_by
+
+        list_reversals = await client.get(
+            "/api/v1/estornos-financeiros", headers=headers, params={"accounts_payable_id": payable_id}
+        )
+        assert list_reversals.status_code == 200
+        assert list_reversals.json()["data"][0]["created_by"] == created_by
 
 
 class TestTotalsDerivedFromAllocationAudit:

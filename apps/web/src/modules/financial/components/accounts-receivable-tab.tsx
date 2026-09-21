@@ -20,7 +20,7 @@ import {
   TableRow,
   toast,
 } from "@gestorfrete/ui";
-import type { InvoiceStatus } from "@gestorfrete/types";
+import type { AccountsReceivable, InvoiceStatus } from "@gestorfrete/types";
 
 import { usePermissions } from "@/core/rbac/permissions-provider";
 import {
@@ -50,11 +50,11 @@ function currentMonthCompetencia(): string {
 }
 
 /**
- * `POST .../commands/confirm-receipt` aceita `received_value` no contrato, mas o handler nunca o
- * lê (`confirm_receipt_accounts_receivable.py` chama `receivable.confirm_receipt(now=now)` sem
- * valor) — uma parcela é sempre baixada pelo valor cheio, nunca parcialmente. Gap registrado, não
- * contornado: nenhum campo de "valor recebido" editável aparece aqui. A baixa **parcial da
- * Fatura** é real e visível — soma das parcelas Recebidas/Conciliadas contra o total faturado.
+ * Baixa parcial real (Lote Financeiro, Parte 2.1) — `receive_payment` no backend valida
+ * `0 < valor <= saldo_aberto` e só chega a `RECEBIDA` quando o saldo zera; antes disso,
+ * `PARCIALMENTE_RECEBIDO`. O input abaixo replica a mesma validação no cliente (feedback
+ * imediato), nunca como substituto da validação real do backend. Chamável de novo enquanto
+ * houver saldo — cada clique em "Confirmar recebimento" é uma baixa, não uma operação única.
  */
 export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId: string; invoiceStatus: InvoiceStatus }) {
   const { hasPermission } = usePermissions();
@@ -68,12 +68,32 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
   const [accountingPeriod, setAccountingPeriod] = React.useState(currentMonthCompetencia());
   const [formError, setFormError] = React.useState<string | null>(null);
 
-  async function handleConfirmReceipt(id: string, installmentValue: string) {
+  const [payingReceivable, setPayingReceivable] = React.useState<AccountsReceivable | null>(null);
+  const [paymentValue, setPaymentValue] = React.useState("");
+  const [paymentError, setPaymentError] = React.useState<string | null>(null);
+
+  function openPaymentDialog(receivable: AccountsReceivable) {
+    setPayingReceivable(receivable);
+    setPaymentValue(receivable.open_balance);
+    setPaymentError(null);
+  }
+
+  async function handleConfirmReceipt(event: React.FormEvent) {
+    event.preventDefault();
+    if (!payingReceivable) return;
+    const openBalance = Number(payingReceivable.open_balance);
+    const amount = Number(paymentValue);
+    if (!(amount > 0) || amount > openBalance) {
+      setPaymentError(`O valor da baixa deve ser maior que zero e no máximo o saldo em aberto (${formatMoney(openBalance)}).`);
+      return;
+    }
+    setPaymentError(null);
     try {
-      await confirmReceipt.mutateAsync({ id, body: { received_value: installmentValue } });
+      await confirmReceipt.mutateAsync({ id: payingReceivable.id, body: { received_value: paymentValue } });
       toast.success("Recebimento confirmado.");
+      setPayingReceivable(null);
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "Não foi possível confirmar o recebimento.");
+      setPaymentError(error instanceof ApiError ? error.message : "Não foi possível confirmar o recebimento.");
     }
   }
 
@@ -96,9 +116,7 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
 
   const receivables = receivablesQuery.data?.data ?? [];
   const total = receivables.reduce((sum, r) => sum + Number(r.value), 0);
-  const received = receivables
-    .filter((r) => r.status === "RECEBIDA" || r.status === "CONCILIADA")
-    .reduce((sum, r) => sum + Number(r.value), 0);
+  const received = receivables.reduce((sum, r) => sum + Number(r.received_value), 0);
   const balance = total - received;
   const canCreate = hasPermission("financial.receivable.create") && invoiceStatus === "EMITIDA";
   const canConfirm = hasPermission("financial.receivable.confirm_receipt");
@@ -141,6 +159,8 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
               <TableHead>Competência</TableHead>
               <TableHead>Vencimento</TableHead>
               <TableHead>Valor</TableHead>
+              <TableHead>Recebido</TableHead>
+              <TableHead>Saldo</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Recebido em</TableHead>
               <TableHead />
@@ -153,6 +173,10 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
                 <TableCell className="text-muted-foreground">{formatCompetencia(receivable.accounting_period)}</TableCell>
                 <TableCell className="text-muted-foreground">{new Date(receivable.due_date).toLocaleDateString("pt-BR")}</TableCell>
                 <TableCell className="font-medium">{formatMoney(Number(receivable.value))}</TableCell>
+                <TableCell className="text-emerald-600">{formatMoney(Number(receivable.received_value))}</TableCell>
+                <TableCell className={Number(receivable.open_balance) > 0 ? "font-medium text-amber-600" : "text-muted-foreground"}>
+                  {formatMoney(Number(receivable.open_balance))}
+                </TableCell>
                 <TableCell>
                   <ReceivableStatusBadge status={receivable.status} />
                 </TableCell>
@@ -160,11 +184,9 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
                   {receivable.received_at ? new Date(receivable.received_at).toLocaleDateString("pt-BR") : "—"}
                 </TableCell>
                 <TableCell>
-                  {(receivable.status === "PENDENTE" || receivable.status === "VENCIDA") && canConfirm ? (
-                    <Button
-                      size="sm" disabled={confirmReceipt.isPending}
-                      onClick={() => handleConfirmReceipt(receivable.id, receivable.value)}
-                    >
+                  {(receivable.status === "PENDENTE" || receivable.status === "VENCIDA" || receivable.status === "PARCIALMENTE_RECEBIDO")
+                  && canConfirm ? (
+                    <Button size="sm" onClick={() => openPaymentDialog(receivable)}>
                       Confirmar recebimento
                     </Button>
                   ) : null}
@@ -174,6 +196,38 @@ export function AccountsReceivableTab({ invoiceId, invoiceStatus }: { invoiceId:
           </TableBody>
         </Table>
       )}
+
+      <Sheet open={payingReceivable !== null} onOpenChange={(open) => !open && setPayingReceivable(null)}>
+        <SheetContent className="flex flex-col gap-6 overflow-y-auto sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Confirmar recebimento — parcela {payingReceivable?.installment_number}</SheetTitle>
+            <SheetDescription>
+              Saldo em aberto: {payingReceivable ? formatMoney(Number(payingReceivable.open_balance)) : "—"}. Informe
+              qualquer valor até esse saldo — uma baixa parcial deixa o restante em aberto para confirmar depois.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleConfirmReceipt} className="flex flex-1 flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="receivable-payment-value">Valor recebido</Label>
+              <Input
+                id="receivable-payment-value" type="number" step="0.01" required value={paymentValue}
+                onChange={(e) => setPaymentValue(e.target.value)}
+              />
+            </div>
+
+            {paymentError ? <p className="text-sm text-destructive">{paymentError}</p> : null}
+
+            <div className="mt-auto flex justify-end gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => setPayingReceivable(null)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={confirmReceipt.isPending}>
+                {confirmReceipt.isPending ? "Confirmando…" : "Confirmar recebimento"}
+              </Button>
+            </div>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent className="flex flex-col gap-6 overflow-y-auto sm:max-w-md">

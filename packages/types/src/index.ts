@@ -396,9 +396,9 @@ export interface UpdateCostCenterRequest {
 }
 
 /* ── Financeiro (Contas a Pagar/Receber, Faturas, Plano de Contas, Contas Bancárias, Estornos) ──
- * Sprint 15, Lote Financeiro, Parte 2. Backend congelado desde a Parte 1 — só consumindo o
- * contrato existente aqui, nenhuma invenção de campo. `FinancialReversal` não expõe quem fez o
- * estorno (sem `actor`/`usuario_id` no contrato) — gap real registrado, não meio-inventado aqui. */
+ * Sprint 15, Lote Financeiro, Parte 2. `FinancialReversal.created_by` — Reconciliado (Lote
+ * Financeiro, Parte 2.1): resolvido via `logs_auditoria` (trilha transversal), não um campo novo
+ * na entidade em si (D266 — Estorno nunca teve `AuditMetadata` própria, decisão deliberada). */
 
 export type PayableOrigin = "VIAGEM" | "ORDEM_SERVICO" | "ABASTECIMENTO" | "COMPRA" | "AJUSTE_MANUAL";
 export type PayableStatus = "LANCADA" | "AGUARDANDO_APROVACAO" | "APROVADA" | "PAGA" | "CONCILIADA" | "REJEITADA";
@@ -498,16 +498,42 @@ export interface CreateInvoiceRequest {
   installments: InvoiceInstallmentRequest[];
 }
 
-export type ReceivableStatus = "PENDENTE" | "VENCIDA" | "RECEBIDA" | "CONCILIADA";
+// `PARCIALMENTE_RECEBIDO` — Lote Financeiro, Parte 2.1 (baixa parcial real de uma parcela isolada).
+export type ReceivableStatus = "PENDENTE" | "VENCIDA" | "PARCIALMENTE_RECEBIDO" | "RECEBIDA" | "CONCILIADA";
 
 export interface AccountsReceivable {
   id: UUID;
+  invoice_id: UUID;
   installment_number: number;
   value: string;
+  // `received_value`/`open_balance` — Lote Financeiro, Parte 2.1.
+  received_value: string;
+  open_balance: string;
   due_date: string;
   accounting_period: string;
   received_at?: ISODateTime;
   status: ReceivableStatus;
+  // Só vem preenchido por `GET /contas-receber` (Lote Financeiro, Parte 2.1) — `undefined` nas
+  // rotas aninhadas sob `/faturas/{invoiceId}/contas-receber`.
+  client_id?: UUID;
+}
+
+// D386, fechado (Lote Financeiro, Parte 2.1) — antes só existia como ID cru sem endpoint próprio.
+export type PaymentMethodStatus = "ATIVA" | "INATIVA";
+
+export interface PaymentMethod {
+  id: UUID;
+  nome: string;
+  status: PaymentMethodStatus;
+}
+
+export interface CreatePaymentMethodRequest {
+  nome: string;
+}
+
+export interface UpdatePaymentMethodRequest {
+  nome?: string;
+  status?: PaymentMethodStatus;
 }
 
 export interface CreateAccountsReceivableRequest {
@@ -591,6 +617,8 @@ export interface FinancialReversal {
   value: string;
   reason: string;
   reversed_at: ISODateTime;
+  // Resolvido via `logs_auditoria`, não um campo próprio do Estorno (ver nota acima).
+  created_by: UUID | null;
 }
 
 export interface CreateFinancialReversalRequest {

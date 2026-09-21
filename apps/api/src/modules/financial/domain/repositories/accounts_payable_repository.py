@@ -20,6 +20,9 @@ class AccountsPayableRepository(Repository[AccountsPayable, uuid.UUID]):
         supplier_id: uuid.UUID | None,
         cost_center_id: uuid.UUID | None,
         trip_id: uuid.UUID | None,
+        vehicle_id: uuid.UUID | None,
+        chart_of_accounts_id: uuid.UUID | None,
+        accounting_period: date | None,
         due_date_from: date | None,
         due_date_to: date | None,
     ) -> tuple[list[AccountsPayable], int]: ...

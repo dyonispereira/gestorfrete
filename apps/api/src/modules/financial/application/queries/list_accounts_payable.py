@@ -24,6 +24,9 @@ class ListAccountsPayableQuery(Query):
     supplier_id: uuid.UUID | None = None
     cost_center_id: uuid.UUID | None = None
     trip_id: uuid.UUID | None = None
+    vehicle_id: uuid.UUID | None = None
+    chart_of_accounts_id: uuid.UUID | None = None
+    accounting_period: date | None = None
     due_date_from: date | None = None
     due_date_to: date | None = None
 
@@ -44,6 +47,8 @@ class ListAccountsPayableHandler(QueryHandler[ListAccountsPayableQuery, ListAcco
             payables, total = await repo.list_page(
                 page=query.page, limit=query.limit, status=query.status, origin=query.origin,
                 supplier_id=query.supplier_id, cost_center_id=query.cost_center_id, trip_id=query.trip_id,
+                vehicle_id=query.vehicle_id, chart_of_accounts_id=query.chart_of_accounts_id,
+                accounting_period=query.accounting_period,
                 due_date_from=query.due_date_from, due_date_to=query.due_date_to,
             )
         return ListAccountsPayableResult(items=[AccountsPayableDTO.from_entity(p) for p in payables], total=total)

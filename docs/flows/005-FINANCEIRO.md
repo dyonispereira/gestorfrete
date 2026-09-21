@@ -50,6 +50,12 @@ AGUARDANDO_FATURAMENTO → FATURADA → AGUARDANDO_RECEBIMENTO → RECEBIDA
 - **Não é permitido** marcar `RECEBIDA` sem conciliação bancária correspondente (ver Máquina de
   Estados — Contas a Pagar/Receber, Conciliação, abaixo).
 
+**Reconciliado (Lote Financeiro, Parte 2.1)**: dentro de `AGUARDANDO_RECEBIMENTO`, cada Conta a
+Receber (parcela) individual ganhou um sub-estado `PARCIALMENTE_RECEBIDO` (baixa parcial real de
+uma única parcela — `docs/domain/006-financeiro.md`) — isso não altera esta máquina de estados da
+Viagem: `AGUARDANDO_RECEBIMENTO → RECEBIDA` só acontece quando **todas** as parcelas da Fatura
+estão com saldo zerado, nunca no meio de uma baixa parcial de qualquer parcela individual.
+
 ## Máquina de Estados — Contas a Pagar
 
 ### Estados

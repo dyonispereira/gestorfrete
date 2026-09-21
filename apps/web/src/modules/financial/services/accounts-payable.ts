@@ -10,11 +10,6 @@ import type {
   UpdateAccountsPayableRequest,
 } from "@gestorfrete/types";
 
-/**
- * `competencia`/`chart_of_accounts_id`/`vehicle_id` não são filtros suportados por
- * `GET /contas-pagar` hoje (`list_accounts_payable.py`) — backend congelado nesta Lote (Parte 2),
- * não adicionados aqui. Filtro real limitado ao que o contrato já expõe.
- */
 export interface ListAccountsPayableParams {
   page?: number;
   limit?: number;
@@ -23,6 +18,11 @@ export interface ListAccountsPayableParams {
   supplier_id?: string;
   cost_center_id?: string;
   trip_id?: string;
+  // `vehicle_id`/`chart_of_accounts_id`/`accounting_period` — Lote Financeiro, Parte 2.1 (gap
+  // registrado na Parte 2: dimensões gravadas na Parte 1 mas não consultáveis, fechado aqui).
+  vehicle_id?: string;
+  chart_of_accounts_id?: string;
+  accounting_period?: string;
   due_date__gte?: string;
   due_date__lte?: string;
 }

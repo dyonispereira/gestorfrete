@@ -4199,6 +4199,19 @@ paths:
           in: query
           required: false
           schema: { $ref: "#/components/schemas/UUID" }
+        - name: vehicle_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: chart_of_accounts_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: accounting_period
+          in: query
+          required: false
+          description: Igualdade exata — sempre o primeiro dia do mês (Reconciliado, Lote Financeiro Parte 2.1)
+          schema: { type: string, format: date }
       responses:
         "200":
           description: Coleção paginada de contas a pagar
@@ -4543,6 +4556,51 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /contas-receber:
+    get:
+      tags: [AccountsReceivable]
+      summary: Consulta agregada de contas a receber entre faturas (Lote Financeiro, Parte 2.1)
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [PENDENTE, VENCIDA, PARCIALMENTE_RECEBIDO, RECEBIDA, CONCILIADA] }
+        - name: client_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: accounting_period
+          in: query
+          required: false
+          description: Igualdade exata — sempre o primeiro dia do mês
+          schema: { type: string, format: date }
+        - name: due_date__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: due_date__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Coleção paginada de contas a receber, entre faturas
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagination"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AccountsReceivable" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   /faturas/{id}/contas-receber:
@@ -10847,12 +10905,16 @@ components:
       type: object
       properties:
         id: { $ref: "#/components/schemas/UUID" }
+        invoice_id: { $ref: "#/components/schemas/UUID", description: "`fatura_id`." }
         installment_number: { type: integer, description: "`numero_parcela`." }
         value: { type: string, description: "`valor`." }
+        received_value: { type: string, readOnly: true, description: "`valor_recebido` — acumulado de baixas (Lote Financeiro, Parte 2.1)." }
+        open_balance: { type: string, readOnly: true, description: "`value - received_value`, calculado (Lote Financeiro, Parte 2.1)." }
         due_date: { type: string, format: date, description: "`data_vencimento`." }
-        received_at: { type: string, format: date-time, readOnly: true, description: "`data_recebimento`." }
-        status: { type: string, enum: [PENDENTE, VENCIDA, RECEBIDA, CONCILIADA], readOnly: true, description: "D264 — nunca via PATCH." }
-      required: [id, installment_number, value, due_date, status]
+        received_at: { type: string, format: date-time, readOnly: true, description: "`data_recebimento` — só quando `received_value == value`." }
+        status: { type: string, enum: [PENDENTE, VENCIDA, PARCIALMENTE_RECEBIDO, RECEBIDA, CONCILIADA], readOnly: true, description: "D264 — nunca via PATCH." }
+        client_id: { $ref: "#/components/schemas/UUID", description: "Só preenchido por `GET /contas-receber` (Lote Financeiro, Parte 2.1) — `null` nas rotas aninhadas." }
+      required: [id, invoice_id, installment_number, value, received_value, open_balance, due_date, status]
 
     AccountsPayable:
       type: object

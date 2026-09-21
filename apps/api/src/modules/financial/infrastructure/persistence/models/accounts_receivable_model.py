@@ -25,6 +25,8 @@ class AccountsReceivableModel(Base):
     fatura_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("faturas.id"), nullable=False)
     numero_parcela: Mapped[int] = mapped_column(Integer, nullable=False)
     valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Lote Financeiro, Parte 2.1 — acumulado de baixas parciais recebidas nesta parcela.
+    valor_recebido: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
     competencia: Mapped[date] = mapped_column(Date, nullable=False)
     data_recebimento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

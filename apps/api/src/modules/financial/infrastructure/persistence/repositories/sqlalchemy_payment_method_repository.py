@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.multitenancy.context import get_current_tenant_id
@@ -25,6 +25,26 @@ class SqlAlchemyPaymentMethodRepository(PaymentMethodRepository):
         stmt = select(PaymentMethodModel).where(PaymentMethodModel.id == id, PaymentMethodModel.tenant_id == tenant_id)
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         return _to_entity(model) if model is not None else None
+
+    async def list_page(self, *, page: int, limit: int, status: str | None) -> tuple[list[PaymentMethod], int]:
+        tenant_id = get_current_tenant_id()
+        stmt = select(PaymentMethodModel).where(PaymentMethodModel.tenant_id == tenant_id)
+        if status is not None:
+            stmt = stmt.where(PaymentMethodModel.status == status)
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self._session.execute(count_stmt)).scalar_one()
+
+        stmt = stmt.order_by(PaymentMethodModel.nome.asc()).offset((page - 1) * limit).limit(limit)
+        models = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(m) for m in models], total
+
+    async def exists_with_nome(self, nome: str) -> bool:
+        tenant_id = get_current_tenant_id()
+        stmt = select(PaymentMethodModel.id).where(
+            PaymentMethodModel.tenant_id == tenant_id, PaymentMethodModel.nome == nome
+        )
+        return (await self._session.execute(stmt)).first() is not None
 
     async def add(self, payment_method: PaymentMethod) -> None:
         tenant_id = get_current_tenant_id()

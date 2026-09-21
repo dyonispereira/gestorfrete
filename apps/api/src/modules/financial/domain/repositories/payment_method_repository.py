@@ -12,3 +12,11 @@ class PaymentMethodRepository(ABC):
 
     @abstractmethod
     async def add(self, payment_method: PaymentMethod) -> None: ...
+
+    @abstractmethod
+    async def list_page(
+        self, *, page: int, limit: int, status: str | None
+    ) -> tuple[list[PaymentMethod], int]: ...
+
+    @abstractmethod
+    async def exists_with_nome(self, nome: str) -> bool: ...

@@ -9,6 +9,7 @@ import {
   FileStack,
   FileText,
   Gauge,
+  HandCoins,
   Landmark,
   LayoutDashboard,
   LineChart,
@@ -21,6 +22,7 @@ import {
   Undo2,
   UserCog,
   Users,
+  Wallet,
   Wrench,
 } from "lucide-react";
 
@@ -215,6 +217,24 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Receipt,
         requiredPermissions: ["financial.payable.view"],
         description: "Despesas de viagem, manutenção, abastecimento e lançamentos administrativos.",
+        implemented: true,
+      },
+      {
+        id: "accounts-receivable",
+        label: "Contas a Receber",
+        href: "/contas-receber",
+        icon: HandCoins,
+        requiredPermissions: ["financial.receivable.view"],
+        description: "O que há para receber em todas as Faturas — consulta agregada (Lote Financeiro, Parte 2.1).",
+        implemented: true,
+      },
+      {
+        id: "payment-methods",
+        label: "Formas de Pagamento",
+        href: "/formas-pagamento",
+        icon: Wallet,
+        requiredPermissions: ["financial.payment_method.view"],
+        description: "PIX, Boleto, Cartão — usadas em Faturas (D386, Lote Financeiro, Parte 2.1).",
         implemented: true,
       },
       {

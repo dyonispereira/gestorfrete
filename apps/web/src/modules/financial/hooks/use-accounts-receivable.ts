@@ -3,7 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import * as receivableService from "@/modules/financial/services/accounts-receivable";
-import type { ConfirmReceiptRequest, CreateAccountsReceivableRequest, UpdateAccountsReceivableRequest } from "@gestorfrete/types";
+import type {
+  ConfirmReceiptRequest,
+  CreateAccountsReceivableRequest,
+  UpdateAccountsReceivableRequest,
+} from "@gestorfrete/types";
+import type { ListAccountsReceivableGlobalParams } from "@/modules/financial/services/accounts-receivable";
 
 export function useAccountsReceivableForInvoiceQuery(invoiceId: string | undefined) {
   return useQuery({
@@ -13,9 +18,18 @@ export function useAccountsReceivableForInvoiceQuery(invoiceId: string | undefin
   });
 }
 
+/** Consulta agregada entre Faturas (Lote Financeiro, Parte 2.1) — `GET /contas-receber`. */
+export function useAccountsReceivableGlobalListQuery(params: ListAccountsReceivableGlobalParams) {
+  return useQuery({
+    queryKey: ["contas-receber-global", params],
+    queryFn: () => receivableService.listAccountsReceivableGlobal(params),
+  });
+}
+
 function invalidate(queryClient: ReturnType<typeof useQueryClient>, invoiceId: string) {
   queryClient.invalidateQueries({ queryKey: ["invoices", invoiceId, "contas-receber"] });
   queryClient.invalidateQueries({ queryKey: ["invoices", invoiceId] });
+  queryClient.invalidateQueries({ queryKey: ["contas-receber-global"] });
 }
 
 export function useCreateAccountsReceivableMutation(invoiceId: string) {

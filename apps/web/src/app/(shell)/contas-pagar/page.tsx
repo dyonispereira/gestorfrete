@@ -3,13 +3,14 @@
 import * as React from "react";
 import { Plus, Receipt } from "lucide-react";
 
-import { Button, Pagination, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@gestorfrete/ui";
+import { Button, Input, Pagination, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@gestorfrete/ui";
 import type { PayableStatus } from "@gestorfrete/types";
 
 import { usePermissions } from "@/core/rbac/permissions-provider";
 import { useAccountsPayableListQuery } from "@/modules/financial/hooks/use-accounts-payable";
 import { useSuppliersQuery } from "@/modules/maintenance/hooks/use-suppliers";
 import { useCostCentersQuery } from "@/modules/financial/hooks/use-cost-centers";
+import { useChartOfAccountsListQuery } from "@/modules/financial/hooks/use-chart-of-accounts";
 import { useVehiclesQuery } from "@/modules/fleet/hooks/use-vehicles";
 import { AccountsPayableFormDrawer } from "@/modules/financial/components/accounts-payable-form-drawer";
 import { AccountsPayableTable } from "@/modules/financial/components/accounts-payable-table";
@@ -27,26 +28,30 @@ const STATUS_OPTIONS: Array<{ value: "all" | PayableStatus; label: string }> = [
   { value: "REJEITADA", label: "Rejeitada" },
 ];
 
-/**
- * Filtros de `competência`/`plano de contas`/`veículo` não existem em `GET /contas-pagar` hoje
- * (backend congelado nesta Lote, Parte 2) — só status/origem/fornecedor/centro de custo/vencimento
- * são filtráveis de verdade. Gap registrado, não contornado com filtro cliente-only enganoso.
- */
 export default function AccountsPayablePage() {
   const { hasPermission } = usePermissions();
   const [page, setPage] = React.useState(1);
   const [status, setStatus] = React.useState<"all" | PayableStatus>("all");
   const [supplierId, setSupplierId] = React.useState("all");
   const [costCenterId, setCostCenterId] = React.useState("all");
+  const [vehicleId, setVehicleId] = React.useState("all");
+  const [chartOfAccountsId, setChartOfAccountsId] = React.useState("all");
+  // Input `type="month"` devolve "YYYY-MM" — convertido para o primeiro dia do mês, mesma
+  // convenção usada na criação da Conta a Pagar (`competencia` sempre `day=1`).
+  const [accountingPeriodMonth, setAccountingPeriodMonth] = React.useState("");
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const payablesQuery = useAccountsPayableListQuery({
     page, limit: 20, status: status === "all" ? undefined : status,
     supplier_id: supplierId === "all" ? undefined : supplierId,
     cost_center_id: costCenterId === "all" ? undefined : costCenterId,
+    vehicle_id: vehicleId === "all" ? undefined : vehicleId,
+    chart_of_accounts_id: chartOfAccountsId === "all" ? undefined : chartOfAccountsId,
+    accounting_period: accountingPeriodMonth ? `${accountingPeriodMonth}-01` : undefined,
   });
   const suppliersQuery = useSuppliersQuery({ limit: 100 });
   const costCentersQuery = useCostCentersQuery({ limit: 100 });
+  const chartOfAccountsQuery = useChartOfAccountsListQuery({ limit: 100, type: "DESPESA" });
   const vehiclesQuery = useVehiclesQuery({ limit: 100 });
 
   const supplierNames = new Map((suppliersQuery.data?.data ?? []).map((s) => [s.id, s.razao_social]));
@@ -107,6 +112,36 @@ export default function AccountsPayablePage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={vehicleId} onValueChange={(v) => { setVehicleId(v); setPage(1); }}>
+          <SelectTrigger className="sm:w-56">
+            <SelectValue placeholder="Todos os veículos" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os veículos</SelectItem>
+            {vehiclesQuery.data?.data.map((vehicle) => (
+              <SelectItem key={vehicle.id} value={vehicle.id}>
+                {vehicle.identity.plate}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={chartOfAccountsId} onValueChange={(v) => { setChartOfAccountsId(v); setPage(1); }}>
+          <SelectTrigger className="sm:w-56">
+            <SelectValue placeholder="Todos os planos de contas" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os planos de contas</SelectItem>
+            {chartOfAccountsQuery.data?.data.map((account) => (
+              <SelectItem key={account.id} value={account.id}>
+                {account.account_code} — {account.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          type="month" className="sm:w-40" aria-label="Competência" value={accountingPeriodMonth}
+          onChange={(event) => { setAccountingPeriodMonth(event.target.value); setPage(1); }}
+        />
       </div>
 
       {payablesQuery.isLoading ? (

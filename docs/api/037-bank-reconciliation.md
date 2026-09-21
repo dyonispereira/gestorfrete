@@ -83,6 +83,14 @@ D266 — mecanismo único de correção pós-fato para Fatura/Conta a Pagar/Cont
 `EstornoRealizado` adicionado a `EVENT_MAP.md` nesta preparação (gap encontrado, corrigido antes de
 escrever este documento).
 
+**Reconciliado (Lote Financeiro, Parte 2.1)**: `FinancialReversalResponse` ganhou `created_by`
+(UUID do usuário, ou `null`). Não é um campo novo do agregado — `FinancialReversal` continua sem
+`AuditMetadata` própria (decisão deliberada de D266, mantida). É resolvido lendo `logs_auditoria`
+(a trilha transversal de `AuditLogger`, D344) pela entidade `estornos_financeiros` + ação
+`CRIACAO` — essa trilha já capturava `ator_id` desde sempre; só não havia leitura exposta até
+aqui. Investigado antes de considerar alterar o schema (per pedido explícito), confirmado que a
+infraestrutura já existia — nenhum `ator_id`/`usuario_id` foi duplicado em `estornos_financeiros`.
+
 ### `GET /api/v1/estornos-financeiros`
 
 **Segurança**: `financial.reversal.view` — código adicionado nesta preparação (D271, junto com
@@ -90,7 +98,8 @@ escrever este documento).
 
 **Query parameters**: `page`/`limit`, `invoice_id`, `accounts_payable_id`, `accounts_receivable_id`.
 
-**Responses**: `200` (`Pagination` de `FinancialReversal`), `401`, `403`, `500`.
+**Responses**: `200` (`Pagination` de `FinancialReversal`, agora com `created_by`), `401`, `403`,
+`500`.
 
 ### `GET /api/v1/estornos-financeiros/{id}`
 

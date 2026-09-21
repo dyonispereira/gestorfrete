@@ -118,7 +118,11 @@ CREATE INDEX idx_faturas_tenant_id_cliente_id ON faturas (tenant_id, cliente_id)
 ## `contas_receber` e `contas_receber_status_history`
 
 ```sql
-CREATE TYPE contas_receber_status_enum AS ENUM ('PENDENTE', 'VENCIDA', 'RECEBIDA', 'CONCILIADA');
+-- Reconciliado (Lote Financeiro, Parte 2.1): PARCIALMENTE_RECEBIDO — baixa parcial real de uma
+-- parcela isolada, distinta do parcelamento (N linhas de contas_receber por fatura).
+CREATE TYPE contas_receber_status_enum AS ENUM (
+    'PENDENTE', 'VENCIDA', 'PARCIALMENTE_RECEBIDO', 'RECEBIDA', 'CONCILIADA'
+);
 
 CREATE TABLE contas_receber (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -126,12 +130,14 @@ CREATE TABLE contas_receber (
     fatura_id           UUID NOT NULL REFERENCES faturas(id),
     numero_parcela      INTEGER NOT NULL,
     valor               NUMERIC(14,2) NOT NULL,
+    valor_recebido      NUMERIC(14,2) NOT NULL DEFAULT 0,   -- Reconciliado (Lote Financeiro, Parte 2.1) — acumulado de baixas; saldo em aberto = valor - valor_recebido
     data_vencimento     DATE NOT NULL,
     data_recebimento    TIMESTAMPTZ,
     status              contas_receber_status_enum NOT NULL DEFAULT 'PENDENTE',
     competencia         DATE NOT NULL,   -- Reconciliado (Lote Financeiro, Parte 1) — explícito, nunca inferido de data_vencimento
 
-    CONSTRAINT uq_contas_receber_fatura_id_parcela UNIQUE (fatura_id, numero_parcela)
+    CONSTRAINT uq_contas_receber_fatura_id_parcela UNIQUE (fatura_id, numero_parcela),
+    CONSTRAINT ck_contas_receber_valor_recebido CHECK (valor_recebido >= 0 AND valor_recebido <= valor)
     -- imutável após CONCILIADA (D100): reforçado na aplicação
 );
 

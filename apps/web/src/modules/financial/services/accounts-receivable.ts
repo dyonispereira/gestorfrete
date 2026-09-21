@@ -7,10 +7,35 @@ import type {
   UpdateAccountsReceivableRequest,
 } from "@gestorfrete/types";
 
-/** Todas as rotas de Conta a Receber são sub-recurso de Fatura (`fatura_id` obrigatório no
- * backend) — não existe `GET /contas-receber` agregado entre Faturas (ver `accounts-receivable-tab.tsx`). */
 export function listAccountsReceivableForInvoice(invoiceId: string): Promise<PaginatedResponse<AccountsReceivable>> {
   return apiFetch<PaginatedResponse<AccountsReceivable>>(`/faturas/${invoiceId}/contas-receber`);
+}
+
+/** `GET /contas-receber` agregado entre Faturas (Lote Financeiro, Parte 2.1) — "o que tenho para
+ * receber hoje" sem abrir Fatura por Fatura. Ownership não muda (continua sub-recurso de Fatura). */
+export interface ListAccountsReceivableGlobalParams {
+  page?: number;
+  limit?: number;
+  status?: string;
+  client_id?: string;
+  accounting_period?: string;
+  due_date__gte?: string;
+  due_date__lte?: string;
+}
+
+function toQuery(params: object): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params) as [string, string | number | undefined][]) {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+export function listAccountsReceivableGlobal(
+  params: ListAccountsReceivableGlobalParams = {}
+): Promise<PaginatedResponse<AccountsReceivable>> {
+  return apiFetch<PaginatedResponse<AccountsReceivable>>(`/contas-receber${toQuery(params)}`);
 }
 
 export function getAccountsReceivable(invoiceId: string, id: string): Promise<AccountsReceivable> {

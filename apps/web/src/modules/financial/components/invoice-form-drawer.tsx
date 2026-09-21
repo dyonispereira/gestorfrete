@@ -24,6 +24,7 @@ import type { InvoiceInstallmentRequest } from "@gestorfrete/types";
 import { useClientsQuery } from "@/modules/crm/hooks/use-clients";
 import { useTripsQuery } from "@/modules/freight/hooks/use-trips";
 import { useCreateInvoiceMutation } from "@/modules/financial/hooks/use-invoices";
+import { usePaymentMethodsListQuery } from "@/modules/financial/hooks/use-payment-methods";
 import { ApiError } from "@/shared/lib/api-client";
 
 interface InvoiceFormDrawerProps {
@@ -45,10 +46,10 @@ function sumInstallments(installments: InvoiceInstallmentRequest[]): number {
 }
 
 /**
- * `payment_method_id` não tem endpoint de listagem (D386 — sem router próprio, mesmo padrão de
- * `Categoria de Veículo`/D363) — campo de ID cru, com rótulo explícito, não uma invenção de
- * dropdown fake. O valor total da Fatura é sempre a soma das parcelas, calculado aqui — o backend
- * não valida essa soma sozinho (gap registrado), então o frontend nunca deixa os dois divergirem.
+ * `payment_method_id` — D386, fechado (Lote Financeiro, Parte 2.1): `GET /formas-pagamento` agora
+ * existe, seleção real em vez do campo de ID cru desta Parte. O valor total da Fatura é sempre a
+ * soma das parcelas, calculado aqui — o backend não valida essa soma sozinho (gap registrado),
+ * então o frontend nunca deixa os dois divergirem.
  */
 export function InvoiceFormDrawer({ open, onOpenChange }: InvoiceFormDrawerProps) {
   const [clientId, setClientId] = React.useState("");
@@ -59,6 +60,7 @@ export function InvoiceFormDrawer({ open, onOpenChange }: InvoiceFormDrawerProps
 
   const clientsQuery = useClientsQuery({ limit: 100 });
   const tripsQuery = useTripsQuery({ limit: 50 });
+  const paymentMethodsQuery = usePaymentMethodsListQuery({ limit: 100, status: "ATIVA" });
   const createInvoice = useCreateInvoiceMutation();
 
   const totalValue = sumInstallments(installments);
@@ -130,12 +132,19 @@ export function InvoiceFormDrawer({ open, onOpenChange }: InvoiceFormDrawerProps
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="invoice-payment-method">ID da forma de pagamento</Label>
-            <Input
-              id="invoice-payment-method" required value={paymentMethodId}
-              onChange={(e) => setPaymentMethodId(e.target.value)}
-              placeholder="Sem tela de cadastro ainda — cole o ID"
-            />
+            <Label htmlFor="invoice-payment-method">Forma de pagamento</Label>
+            <Select value={paymentMethodId} onValueChange={setPaymentMethodId}>
+              <SelectTrigger id="invoice-payment-method">
+                <SelectValue placeholder="Selecione uma forma de pagamento ativa" />
+              </SelectTrigger>
+              <SelectContent>
+                {paymentMethodsQuery.data?.data.map((paymentMethod) => (
+                  <SelectItem key={paymentMethod.id} value={paymentMethod.id}>
+                    {paymentMethod.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex flex-col gap-2">

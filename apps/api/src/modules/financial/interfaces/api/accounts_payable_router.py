@@ -72,6 +72,9 @@ async def list_accounts_payable(
     supplier_id: uuid.UUID | None = None,
     cost_center_id: uuid.UUID | None = None,
     trip_id: uuid.UUID | None = None,
+    vehicle_id: uuid.UUID | None = None,
+    chart_of_accounts_id: uuid.UUID | None = None,
+    accounting_period: date | None = None,
     due_date__gte: date | None = None,
     due_date__lte: date | None = None,
     actor: AuthenticatedActor = Depends(require_permission("financial.payable.view")),
@@ -80,7 +83,9 @@ async def list_accounts_payable(
     result = await handler.handle(
         ListAccountsPayableQuery(
             actor=actor, page=page, limit=limit, status=status, origin=origin, supplier_id=supplier_id,
-            cost_center_id=cost_center_id, trip_id=trip_id, due_date_from=due_date__gte, due_date_to=due_date__lte,
+            cost_center_id=cost_center_id, trip_id=trip_id, vehicle_id=vehicle_id,
+            chart_of_accounts_id=chart_of_accounts_id, accounting_period=accounting_period,
+            due_date_from=due_date__gte, due_date_to=due_date__lte,
         )
     )
     return {

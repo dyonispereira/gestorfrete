@@ -36,10 +36,12 @@ class ConfirmReceiptAccountsReceivableCommand(Command):
 class ConfirmReceiptAccountsReceivableHandler(
     CommandHandler[ConfirmReceiptAccountsReceivableCommand, AccountsReceivableDTO]
 ):
-    """Auditoria #1 do usuário, continuação — D390: soma `valor` de todas as parcelas `RECEBIDA`
-    da Fatura e chama `TripInternalTransitions.update_realized_revenue`; quando a **última** parcela
-    pendente é confirmada, chama também `record_financial_transition(RECEBIDA)` (D262/D390,
-    `RecebimentoConfirmado`)."""
+    """Auditoria #1 do usuário, continuação — D390: soma `valor_recebido` de todas as parcelas
+    (inclusive `PARCIALMENTE_RECEBIDO`, Lote Financeiro Parte 2.1) da Fatura e chama
+    `TripInternalTransitions.update_realized_revenue`; quando a **última** parcela deixa de ter
+    saldo em aberto, chama também `record_financial_transition(RECEBIDA)` (D262/D390,
+    `RecebimentoConfirmado`). Uma baixa parcial nunca dispara essa transição — só quando todas as
+    parcelas da Fatura estão 100% recebidas."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -59,7 +61,7 @@ class ConfirmReceiptAccountsReceivableHandler(
                 raise NotFoundError("FINANCIAL_RECEIVABLE_NOT_FOUND", "Conta a Receber não encontrada.")
 
             now = datetime.now(timezone.utc)
-            receivable.confirm_receipt(now=now)
+            receivable.receive_payment(valor=command.received_value, now=now)
             await receivable_repo.add(receivable)
 
             await history_repo.add(

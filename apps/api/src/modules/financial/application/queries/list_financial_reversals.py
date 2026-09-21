@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from core.audit.audit_reader import AuditTrailReader
 from modules.financial.application.dtos.financial_reversal_dto import FinancialReversalDTO
 from modules.financial.infrastructure.persistence.repositories.sqlalchemy_financial_reversal_repository import (
     SqlAlchemyFinancialReversalRepository,
@@ -41,6 +42,14 @@ class ListFinancialReversalsHandler(QueryHandler[ListFinancialReversalsQuery, Li
                 accounts_payable_id=query.accounts_payable_id,
                 accounts_receivable_id=query.accounts_receivable_id,
             )
+            actors = await AuditTrailReader().find_actors_batch(
+                session, tenant_id=query.actor.tenant_id, entidade_tipo="estornos_financeiros",
+                entidade_ids=[r.id for r in reversals], acao="CRIACAO",
+            )
         return ListFinancialReversalsResult(
-            items=[FinancialReversalDTO.from_entity(r) for r in reversals], total=total
+            items=[
+                FinancialReversalDTO.from_entity(r, criado_por=actors[r.id].ator_id if r.id in actors else None)
+                for r in reversals
+            ],
+            total=total,
         )

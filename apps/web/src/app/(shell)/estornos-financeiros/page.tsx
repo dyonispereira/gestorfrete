@@ -7,6 +7,7 @@ import { Button, Pagination } from "@gestorfrete/ui";
 
 import { usePermissions } from "@/core/rbac/permissions-provider";
 import { useFinancialReversalsListQuery } from "@/modules/financial/hooks/use-financial-reversals";
+import { useUsersQuery } from "@/modules/identity/hooks/use-users";
 import { FinancialReversalFormDrawer } from "@/modules/financial/components/financial-reversal-form-drawer";
 import { FinancialReversalsList } from "@/modules/financial/components/financial-reversals-list";
 import { EmptyState } from "@/shared/components/states/empty-state";
@@ -19,6 +20,12 @@ export default function FinancialReversalsPage() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const reversalsQuery = useFinancialReversalsListQuery({ page, limit: 20 });
+  // `created_by` é um UUID cru (resolvido via `logs_auditoria` no backend, não um campo do
+  // Estorno) — resolver o nome exige `identity_access.user.view`, permissão de outro módulo que
+  // nem todo perfil financeiro tem. Sem ela, a lista mostra o ID em vez de inventar um nome.
+  const canViewUsers = hasPermission("identity_access.user.view");
+  const usersQuery = useUsersQuery({ limit: 100 });
+  const userNames = new Map((canViewUsers ? usersQuery.data?.data ?? [] : []).map((u) => [u.id, u.nome]));
 
   return (
     <div className="flex flex-col gap-6">
@@ -45,7 +52,7 @@ export default function FinancialReversalsPage() {
         />
       ) : reversalsQuery.data && reversalsQuery.data.data.length > 0 ? (
         <>
-          <FinancialReversalsList reversals={reversalsQuery.data.data} />
+          <FinancialReversalsList reversals={reversalsQuery.data.data} userNames={userNames} canViewUsers={canViewUsers} />
           <Pagination
             page={reversalsQuery.data.meta.pagination.page} limit={reversalsQuery.data.meta.pagination.limit}
             total={reversalsQuery.data.meta.pagination.total} onPageChange={setPage}

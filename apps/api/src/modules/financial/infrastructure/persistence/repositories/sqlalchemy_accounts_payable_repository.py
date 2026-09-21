@@ -53,6 +53,9 @@ class SqlAlchemyAccountsPayableRepository(AccountsPayableRepository):
         supplier_id: uuid.UUID | None,
         cost_center_id: uuid.UUID | None,
         trip_id: uuid.UUID | None,
+        vehicle_id: uuid.UUID | None,
+        chart_of_accounts_id: uuid.UUID | None,
+        accounting_period: date | None,
         due_date_from: date | None,
         due_date_to: date | None,
     ) -> tuple[list[AccountsPayable], int]:
@@ -70,6 +73,12 @@ class SqlAlchemyAccountsPayableRepository(AccountsPayableRepository):
             stmt = stmt.where(AccountsPayableModel.centro_custo_id == cost_center_id)
         if trip_id is not None:
             stmt = stmt.where(AccountsPayableModel.viagem_id == trip_id)
+        if vehicle_id is not None:
+            stmt = stmt.where(AccountsPayableModel.veiculo_tracionador_id == vehicle_id)
+        if chart_of_accounts_id is not None:
+            stmt = stmt.where(AccountsPayableModel.plano_contas_id == chart_of_accounts_id)
+        if accounting_period is not None:
+            stmt = stmt.where(AccountsPayableModel.competencia == accounting_period)
         if due_date_from is not None:
             stmt = stmt.where(AccountsPayableModel.data_vencimento >= due_date_from)
         if due_date_to is not None:
