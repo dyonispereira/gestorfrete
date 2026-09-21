@@ -19,6 +19,7 @@ from modules.financial.application.commands.create_invoice import (
     CreateInvoiceCommand,
     CreateInvoiceHandler,
     InvoiceInstallmentInput,
+    InvoiceTripInput,
 )
 from modules.financial.application.commands.update_accounts_receivable import (
     UpdateAccountsReceivableCommand,
@@ -33,6 +34,10 @@ from modules.financial.application.queries.list_accounts_receivable import (
     ListAccountsReceivableHandler,
     ListAccountsReceivableQuery,
 )
+from modules.financial.application.queries.list_eligible_trips_for_invoice import (
+    ListEligibleTripsForInvoiceHandler,
+    ListEligibleTripsForInvoiceQuery,
+)
 from modules.financial.application.queries.list_invoices import ListInvoicesHandler, ListInvoicesQuery
 from modules.financial.interfaces.schemas.accounts_receivable_schemas import (
     AccountsReceivableResponse,
@@ -42,12 +47,27 @@ from modules.financial.interfaces.schemas.accounts_receivable_schemas import (
 )
 from modules.financial.interfaces.schemas.invoice_schemas import (
     CreateInvoiceRequest,
+    EligibleTripResponse,
     InvoiceResponse,
 )
 from modules.identity_access.interfaces.dependencies.authorization import require_permission
 from shared_kernel.domain.actor import AuthenticatedActor
 
 router = APIRouter(prefix="/faturas", tags=["Invoices"])
+
+
+@router.get("/viagens-elegiveis", response_model=list[EligibleTripResponse])
+async def list_eligible_trips(
+    client_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(require_permission("financial.invoice.create")),
+) -> list[EligibleTripResponse]:
+    """Lote Financeiro, Parte 3 — registrado antes de `/{invoice_id}` na ordem das rotas para que
+    `viagens-elegiveis` nunca seja capturado como um `{invoice_id}` (FastAPI resolve por ordem de
+    declaração — mesmo cuidado já aplicado em `023-vehicle-compositions.md`/D248)."""
+
+    handler = ListEligibleTripsForInvoiceHandler(get_session_factory())
+    trips = await handler.handle(ListEligibleTripsForInvoiceQuery(actor=actor, client_id=client_id))
+    return [EligibleTripResponse.from_dto(t) for t in trips]
 
 
 @router.get("")
@@ -87,8 +107,10 @@ async def create_invoice(
     handler = CreateInvoiceHandler()
     dto = await handler.handle(
         CreateInvoiceCommand(
-            actor=actor, trip_id=body.trip_id, delivery_id=body.delivery_id, client_id=body.client_id,
-            total_value=body.total_value, payment_method_id=body.payment_method_id,
+            actor=actor, trips=[InvoiceTripInput(trip_id=t.trip_id, value=t.value) for t in body.trips],
+            delivery_id=body.delivery_id, client_id=body.client_id,
+            adjustment_value=body.adjustment_value, adjustment_reason=body.adjustment_reason,
+            payment_method_id=body.payment_method_id,
             installments=[
                 InvoiceInstallmentInput(value=i.value, due_date=i.due_date, accounting_period=i.accounting_period)
                 for i in body.installments

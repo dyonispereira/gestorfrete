@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.exceptions.base import NotFoundError
-from modules.financial.application.dtos.invoice_dto import InvoiceDTO
+from modules.financial.application.dtos.invoice_dto import InvoiceDTO, InvoiceTripDTO
 from modules.financial.infrastructure.persistence.repositories.sqlalchemy_invoice_repository import (
     SqlAlchemyInvoiceRepository,
+)
+from modules.financial.infrastructure.persistence.repositories.sqlalchemy_invoice_trip_repository import (
+    SqlAlchemyInvoiceTripRepository,
 )
 from shared_kernel.application.query import Query, QueryHandler
 from shared_kernel.domain.actor import AuthenticatedActor
@@ -26,8 +29,8 @@ class GetInvoiceHandler(QueryHandler[GetInvoiceQuery, InvoiceDTO]):
 
     async def handle(self, query: GetInvoiceQuery) -> InvoiceDTO:
         async with self._session_factory() as session:
-            repo = SqlAlchemyInvoiceRepository(session)
-            invoice = await repo.get_by_id(query.invoice_id)
-        if invoice is None:
-            raise NotFoundError("FINANCIAL_INVOICE_NOT_FOUND", "Fatura não encontrada.")
-        return InvoiceDTO.from_entity(invoice)
+            invoice = await SqlAlchemyInvoiceRepository(session).get_by_id(query.invoice_id)
+            if invoice is None:
+                raise NotFoundError("FINANCIAL_INVOICE_NOT_FOUND", "Fatura não encontrada.")
+            trips = await SqlAlchemyInvoiceTripRepository(session).list_for_invoice(query.invoice_id)
+        return InvoiceDTO.from_entity(invoice, trips=[InvoiceTripDTO.from_entity(t) for t in trips])

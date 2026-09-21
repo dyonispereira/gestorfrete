@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { FileText, Plus } from "lucide-react";
 
 import { Button, Pagination, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@gestorfrete/ui";
@@ -9,7 +10,6 @@ import type { InvoiceStatus } from "@gestorfrete/types";
 import { usePermissions } from "@/core/rbac/permissions-provider";
 import { useInvoicesListQuery } from "@/modules/financial/hooks/use-invoices";
 import { useClientsQuery } from "@/modules/crm/hooks/use-clients";
-import { InvoiceFormDrawer } from "@/modules/financial/components/invoice-form-drawer";
 import { InvoicesTable } from "@/modules/financial/components/invoices-table";
 import { EmptyState } from "@/shared/components/states/empty-state";
 import { ErrorState } from "@/shared/components/states/error-state";
@@ -25,7 +25,6 @@ export default function InvoicesPage() {
   const { hasPermission } = usePermissions();
   const [page, setPage] = React.useState(1);
   const [status, setStatus] = React.useState<"all" | InvoiceStatus>("all");
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const invoicesQuery = useInvoicesListQuery({ page, limit: 20, status: status === "all" ? undefined : status });
   const clientsQuery = useClientsQuery({ limit: 100 });
@@ -39,9 +38,11 @@ export default function InvoicesPage() {
           <p className="text-sm text-muted-foreground">Faturamento por viagem/entrega, com Contas a Receber geradas.</p>
         </div>
         {hasPermission("financial.invoice.create") ? (
-          <Button onClick={() => setDrawerOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Nova fatura
+          <Button asChild>
+            <Link href="/faturas/nova">
+              <Plus className="h-4 w-4" />
+              Nova fatura
+            </Link>
           </Button>
         ) : null}
       </div>
@@ -78,8 +79,6 @@ export default function InvoicesPage() {
       ) : (
         <EmptyState icon={FileText} title="Nenhuma fatura encontrada" description="Ajuste o filtro ou crie a primeira fatura." />
       )}
-
-      <InvoiceFormDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>
   );
 }

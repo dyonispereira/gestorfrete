@@ -4468,6 +4468,7 @@ paths:
           in: query
           required: false
           schema: { $ref: "#/components/schemas/UUID" }
+          description: "Lote Financeiro, Parte 3 — filtra faturas que têm essa Viagem entre seus itens (`EXISTS` join em `fatura_viagens`), não mais igualdade num `viagem_id` singular."
       responses:
         "200":
           description: Coleção paginada de faturas
@@ -4486,7 +4487,14 @@ paths:
         "500": { $ref: "#/components/responses/InternalServerError" }
     post:
       tags: [Invoices]
-      summary: Cria uma fatura e suas contas a receber (parcelas) atomicamente
+      summary: Cria uma fatura, seus itens (`fatura_viagens`) e as contas a receber (parcelas) atomicamente
+      description: >
+        Lote Financeiro, Parte 3 — Faturamento Agrupado. `trips` (N≥1) substitui o antigo `trip_id`
+        singular; faturar uma única Viagem é o caso N=1 do mesmo motor. `total_value` não é mais
+        aceito do cliente: o servidor calcula `gross_value = Σ trips[].value` e
+        `total_value = gross_value + adjustment_value`. Todas as validações (elegibilidade,
+        mesmo cliente, duplicata na seleção, Viagem já faturada) rodam antes de qualquer escrita —
+        falha na criação não deixa metade das Viagens faturadas.
       requestBody:
         required: true
         content:
@@ -4494,10 +4502,19 @@ paths:
             schema:
               type: object
               properties:
-                trip_id: { $ref: "#/components/schemas/UUID" }
-                delivery_id: { $ref: "#/components/schemas/UUID" }
+                trips:
+                  type: array
+                  description: "Itens da Fatura — mutuamente exclusivo com `delivery_id`. Cada `trip_id` deve ser elegível (ver `GET /faturas/viagens-elegiveis`), do mesmo `client_id`, e não pode se repetir na lista nem já estar faturado noutra Fatura ativa."
+                  items:
+                    type: object
+                    properties:
+                      trip_id: { $ref: "#/components/schemas/UUID" }
+                      value: { type: string, description: "Valor faturável do item, > 0 — nunca herdado silenciosamente." }
+                    required: [trip_id, value]
+                delivery_id: { $ref: "#/components/schemas/UUID", description: "Modo \"por entrega\" — mutuamente exclusivo com `trips`." }
                 client_id: { $ref: "#/components/schemas/UUID" }
-                total_value: { type: string }
+                adjustment_value: { type: string, default: "0", description: "Ajuste explícito somado ao `gross_value` calculado. Exige `adjustment_reason` quando != 0." }
+                adjustment_reason: { type: string, nullable: true }
                 payment_method_id: { $ref: "#/components/schemas/UUID" }
                 installments:
                   type: array
@@ -4506,8 +4523,9 @@ paths:
                     properties:
                       value: { type: string }
                       due_date: { type: string, format: date }
-                    required: [value, due_date]
-              required: [client_id, total_value, payment_method_id, installments]
+                      accounting_period: { type: string, format: date, description: "`competencia` da parcela." }
+                    required: [value, due_date, accounting_period]
+              required: [client_id, payment_method_id, installments]
       responses:
         "201":
           description: Fatura criada
@@ -4516,11 +4534,53 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Invoice" }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          description: >
+            Requisição inválida — inclui `FINANCIAL_INVOICE_DUPLICATE_TRIP` (mesma Viagem repetida
+            em `trips`), `FINANCIAL_INVOICE_ADJUSTMENT_REASON_REQUIRED` (`adjustment_value != 0`
+            sem `adjustment_reason`), `FINANCIAL_INVOICE_ORIGIN_MISMATCH` (`trips` e `delivery_id`
+            preenchidos simultaneamente, ou nenhum dos dois), `FINANCIAL_INVOICE_TRIP_INVALID_VALUE`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409":
+          description: >
+            Conflito — inclui `FINANCIAL_INVOICE_CLIENT_MISMATCH` (Viagem não pertence a
+            `client_id`), `FINANCIAL_INVOICE_TRIP_ALREADY_INVOICED` (Viagem já é item de outra
+            Fatura ativa), `FINANCIAL_INVOICE_MISSING_PRECONDITION` (Viagem sem POD/CT-e
+            autorizado — mesma regra de elegibilidade do fluxo individual).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /faturas/viagens-elegiveis:
+    get:
+      tags: [Invoices]
+      summary: Lista Viagens elegíveis para faturamento de um cliente (Lote Financeiro, Parte 3)
+      description: >
+        Alimenta o picker do wizard "Nova Fatura". Aplica exatamente as mesmas regras de
+        elegibilidade de `POST /faturas` (POD registrado, CT-e autorizado, ainda não faturada) —
+        nunca uma lista mais permissiva que a criação aceitaria. Registrada antes de
+        `/faturas/{id}` na ordem de rotas para não ser capturada como `{invoice_id}`.
+      parameters:
+        - name: client_id
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/UUID" }
+      responses:
+        "200":
+          description: Viagens elegíveis do cliente
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EligibleTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   /faturas/{id}:
@@ -10910,18 +10970,51 @@ components:
     # -------------------------------------------------------------------------
     Invoice:
       type: object
+      description: >
+        Lote Financeiro, Parte 3 — Faturamento Agrupado. `trips` substitui o antigo `trip_id`
+        singular: uma Fatura cobre N Viagens elegíveis do mesmo cliente via `fatura_viagens`
+        (nunca um array/JSON improvisado). Fatura por Entrega continua existindo à parte
+        (`delivery_id` preenchido, `trips` vazio) — os dois modos são mutuamente exclusivos.
       properties:
         id: { $ref: "#/components/schemas/UUID" }
         invoice_number: { type: string, description: "`numero_fatura`." }
-        trip_id: { $ref: "#/components/schemas/UUID", description: "`viagem_id` — um dos dois (trip_id/delivery_id) é obrigatório." }
-        delivery_id: { $ref: "#/components/schemas/UUID", description: "`entrega_id`." }
+        delivery_id: { $ref: "#/components/schemas/UUID", description: "`entrega_id` — modo \"por entrega\", mutuamente exclusivo com `trips`." }
         client_id: { $ref: "#/components/schemas/UUID", description: "`cliente_id`." }
-        total_value: { type: string, description: "`valor_total` — D100, imutável após emitida." }
+        gross_value: { type: string, description: "`valor_bruto` — soma dos valores faturáveis dos itens (`trips[].value`)." }
+        adjustment_value: { type: string, description: "`valor_ajuste` — explícito e auditável; exige `adjustment_reason` quando != 0." }
+        adjustment_reason: { type: string, nullable: true, description: "`motivo_ajuste`." }
+        total_value: { type: string, description: "`valor_total = gross_value + adjustment_value` — D100, calculado, imutável após emitida." }
         issue_date: { type: string, format: date, description: "`data_emissao`." }
         payment_method_id: { $ref: "#/components/schemas/UUID", description: "`forma_pagamento_id`." }
         status: { type: string, enum: [EMITIDA, CANCELADA], readOnly: true }
+        trips:
+          type: array
+          description: "Itens da Fatura (`fatura_viagens`) — vazio no modo \"por entrega\"."
+          items: { $ref: "#/components/schemas/InvoiceTrip" }
         audit: { $ref: "#/components/schemas/AuditMetadata" }
-      required: [id, invoice_number, client_id, total_value, issue_date, payment_method_id, status, audit]
+      required: [id, invoice_number, client_id, gross_value, adjustment_value, total_value, issue_date, payment_method_id, status, trips, audit]
+
+    InvoiceTrip:
+      type: object
+      description: >
+        Item de Fatura (`fatura_viagens`) — associação auditável Fatura↔Viagem. Só guarda
+        `trip_id`+`value`; Entrega/CT-e são acessíveis apenas por navegação a partir da Viagem
+        (D008 — financial não vira proprietária de fato fiscal).
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        trip_id: { $ref: "#/components/schemas/UUID", description: "`viagem_id`." }
+        value: { type: string, description: "`valor` — capturado na criação da Fatura, > 0, imutável." }
+      required: [id, trip_id, value]
+
+    EligibleTrip:
+      type: object
+      description: "Item de `GET /faturas/viagens-elegiveis` — Viagem candidata a compor uma Fatura."
+      properties:
+        trip_id: { $ref: "#/components/schemas/UUID" }
+        codigo: { type: string, description: "Código legível da Viagem (não o UUID)." }
+        scheduled_date: { type: string, format: date, nullable: true }
+        suggested_value: { type: string, nullable: true, description: "Sugestão de valor (receita prevista da Viagem) — apenas um default editável no wizard, nunca aplicado silenciosamente." }
+      required: [trip_id, codigo]
 
     AccountsReceivable:
       type: object

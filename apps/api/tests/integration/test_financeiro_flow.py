@@ -33,7 +33,7 @@ from modules.financial.infrastructure.persistence.models.bank_account_model impo
 from modules.financial.infrastructure.persistence.models.chart_of_accounts_model import ChartOfAccountsModel
 from modules.financial.infrastructure.persistence.models.cost_center_model import CostCenterModel
 from modules.financial.infrastructure.persistence.models.financial_reversal_model import FinancialReversalModel
-from modules.financial.infrastructure.persistence.models.invoice_model import InvoiceModel
+from modules.financial.infrastructure.persistence.models.invoice_model import InvoiceModel, InvoiceTripModel
 from modules.financial.infrastructure.persistence.models.payment_method_model import PaymentMethodModel
 from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
@@ -295,6 +295,7 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
             delete(ReceivableStatusHistoryModel).where(ReceivableStatusHistoryModel.tenant_id == tenant_id)
         )
         await session.execute(delete(AccountsReceivableModel).where(AccountsReceivableModel.tenant_id == tenant_id))
+        await session.execute(delete(InvoiceTripModel).where(InvoiceTripModel.tenant_id == tenant_id))
         await session.execute(delete(InvoiceModel).where(InvoiceModel.tenant_id == tenant_id))
         await session.execute(delete(ExpenseAllocationModel).where(ExpenseAllocationModel.tenant_id == tenant_id))
         await session.execute(delete(ExpenseApprovalModel).where(ExpenseApprovalModel.tenant_id == tenant_id))
@@ -497,6 +498,16 @@ async def _prepare_invoiceable_trip(
     real de `POST /faturas` (D388). Retorna `(trip_id, delivery_id)`."""
 
     client_id = await _create_client_entity(client, headers)
+    trip_id, delivery_id = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+    return trip_id, delivery_id
+
+
+async def _prepare_invoiceable_trip_for_client(
+    client: AsyncClient, headers: dict[str, str], tenant_id: uuid.UUID, category_id: uuid.UUID, client_id: str
+) -> tuple[str, str]:
+    """Mesmo preparo de `_prepare_invoiceable_trip`, mas para um Cliente já existente — permite
+    montar N Viagens elegíveis do mesmo Cliente (Lote Financeiro, Parte 3 — Faturamento Agrupado)."""
+
     driver_id = await _create_driver(client, headers)
     vehicle_id = await _create_vehicle(client, headers, category_id)
 
@@ -776,7 +787,7 @@ class TestInvoiceAndReceivableFlow:
         missing_precondition = await client.post(
             "/api/v1/faturas", headers=headers,
             json={
-                "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
                 "payment_method_id": str(payment_method_id),
                 "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
@@ -796,7 +807,7 @@ class TestInvoiceAndReceivableFlow:
         create_invoice = await client.post(
             "/api/v1/faturas", headers=headers,
             json={
-                "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
                 "payment_method_id": str(payment_method_id),
                 "installments": [
                     {"value": "600.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}, {"value": "400.00", "due_date": "2026-11-01", "accounting_period": "2026-11-01"},
@@ -869,7 +880,7 @@ class TestInvoiceAndReceivableFlow:
         create_invoice = await client.post(
             "/api/v1/faturas", headers=headers,
             json={
-                "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
                 "payment_method_id": str(payment_method_id),
                 "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
@@ -922,6 +933,245 @@ class TestInvoiceAndReceivableFlow:
         already_received = await client.post(confirm_url, headers=headers, json={"received_value": "1.00"})
         assert already_received.status_code == 409, already_received.text
         assert already_received.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_TRANSITION"
+
+
+class TestGroupedInvoicing:
+    """Lote Financeiro, Parte 3 — Faturamento Agrupado. `1 Fatura → N Viagens` do mesmo Cliente,
+    via `fatura_viagens` (nunca um array/JSON de IDs — pedido explícito do usuário)."""
+
+    async def test_eligible_trips_endpoint_excludes_ineligible_and_already_invoiced(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+
+        eligible_trip_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+
+        # Viagem do mesmo Cliente, mas sem Canhoto/CT-e — não deve aparecer na lista.
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+        ineligible = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        ineligible_trip_id = ineligible.json()["id"]
+        await _allocate_and_plan(client, headers, ineligible_trip_id, driver_id, vehicle_id)
+
+        before_invoicing = await client.get(
+            "/api/v1/faturas/viagens-elegiveis", headers=headers, params={"client_id": client_id}
+        )
+        assert before_invoicing.status_code == 200, before_invoicing.text
+        eligible_ids = {t["trip_id"] for t in before_invoicing.json()}
+        assert eligible_trip_id in eligible_ids
+        assert ineligible_trip_id not in eligible_ids
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": eligible_trip_id, "value": "500.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "500.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+
+        # Já faturada — some da lista de elegíveis.
+        after_invoicing = await client.get(
+            "/api/v1/faturas/viagens-elegiveis", headers=headers, params={"client_id": client_id}
+        )
+        assert eligible_trip_id not in {t["trip_id"] for t in after_invoicing.json()}
+
+    async def test_two_trips_same_client_one_invoice_revenue_never_doubles(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """O teste principal pedido pelo usuário: 2 Viagens do mesmo Cliente → 1 Fatura → CR →
+        baixa parcial → baixa total, com a receita rateada entre as Viagens (nunca duplicada)."""
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+
+        trip_a_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+        trip_b_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [
+                    {"trip_id": trip_a_id, "value": "600.00"}, {"trip_id": trip_b_id, "value": "400.00"},
+                ],
+                "client_id": client_id, "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+        invoice_id = create_invoice.json()["id"]
+        assert create_invoice.json()["gross_value"] == "1000.00"
+        assert create_invoice.json()["total_value"] == "1000.00"
+        trip_ids_in_invoice = {t["trip_id"] for t in create_invoice.json()["trips"]}
+        assert trip_ids_in_invoice == {trip_a_id, trip_b_id}
+
+        trip_a_after_invoice = await client.get(f"/api/v1/viagens/{trip_a_id}", headers=headers)
+        trip_b_after_invoice = await client.get(f"/api/v1/viagens/{trip_b_id}", headers=headers)
+        assert trip_a_after_invoice.json()["status"]["financial"] == "FATURADA"
+        assert trip_b_after_invoice.json()["status"]["financial"] == "FATURADA"
+
+        receivables = await client.get(f"/api/v1/faturas/{invoice_id}/contas-receber", headers=headers)
+        receivable_id = receivables.json()["data"][0]["id"]
+        confirm_url = f"/api/v1/faturas/{invoice_id}/contas-receber/{receivable_id}/commands/confirm-receipt"
+
+        # Baixa parcial: 300 de 1000 (30%) — rateado 30% para cada Viagem (180/120), nunca 300 em cada.
+        partial = await client.post(confirm_url, headers=headers, json={"received_value": "300.00"})
+        assert partial.status_code == 200, partial.text
+        assert partial.json()["status"] == "PARCIALMENTE_RECEBIDO"
+
+        trip_a_mid = await client.get(f"/api/v1/viagens/{trip_a_id}/financeiro", headers=headers)
+        trip_b_mid = await client.get(f"/api/v1/viagens/{trip_b_id}/financeiro", headers=headers)
+        assert trip_a_mid.json()["actual_revenue"] == "180.00"
+        assert trip_b_mid.json()["actual_revenue"] == "120.00"
+        # A soma nunca pode exceder o que foi de fato recebido — a receita não "dobra" por a Fatura agrupar Viagens.
+        assert Decimal(trip_a_mid.json()["actual_revenue"]) + Decimal(trip_b_mid.json()["actual_revenue"]) == Decimal("300.00")
+
+        # Baixa final: os 700 restantes.
+        final = await client.post(confirm_url, headers=headers, json={"received_value": "700.00"})
+        assert final.status_code == 200, final.text
+        assert final.json()["status"] == "RECEBIDA"
+
+        trip_a_final = await client.get(f"/api/v1/viagens/{trip_a_id}/financeiro", headers=headers)
+        trip_b_final = await client.get(f"/api/v1/viagens/{trip_b_id}/financeiro", headers=headers)
+        assert trip_a_final.json()["actual_revenue"] == "600.00"
+        assert trip_b_final.json()["actual_revenue"] == "400.00"
+        assert Decimal(trip_a_final.json()["actual_revenue"]) + Decimal(trip_b_final.json()["actual_revenue"]) == Decimal("1000.00")
+
+        trip_a_status = await client.get(f"/api/v1/viagens/{trip_a_id}", headers=headers)
+        trip_b_status = await client.get(f"/api/v1/viagens/{trip_b_id}", headers=headers)
+        assert trip_a_status.json()["status"]["financial"] == "RECEBIDA"
+        assert trip_b_status.json()["status"]["financial"] == "RECEBIDA"
+
+    async def test_client_mismatch_blocks_creation_atomically(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_a_id = await _create_client_entity(client, headers)
+        client_b_id = await _create_client_entity(client, headers)
+
+        trip_a_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_a_id)
+        trip_b_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_b_id)
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_a_id, "value": "500.00"}, {"trip_id": trip_b_id, "value": "500.00"}],
+                "client_id": client_a_id, "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 409, create_invoice.text
+        assert create_invoice.json()["error"]["code"] == "FINANCIAL_INVOICE_CLIENT_MISMATCH"
+
+        # Atomicidade: a Viagem do Cliente correto não deve ter sido faturada nem parcialmente.
+        trip_a_after = await client.get(f"/api/v1/viagens/{trip_a_id}", headers=headers)
+        assert trip_a_after.json()["status"]["financial"] != "FATURADA"
+        still_eligible = await client.get(
+            "/api/v1/faturas/viagens-elegiveis", headers=headers, params={"client_id": client_a_id}
+        )
+        assert trip_a_id in {t["trip_id"] for t in still_eligible.json()}
+
+    async def test_duplicate_trip_in_same_request_rejected(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+        trip_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "500.00"}, {"trip_id": trip_id, "value": "500.00"}],
+                "client_id": client_id, "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 400, create_invoice.text
+        assert create_invoice.json()["error"]["code"] == "FINANCIAL_INVOICE_DUPLICATE_TRIP"
+
+    async def test_trip_already_invoiced_cannot_be_reused_across_invoices(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+        trip_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+
+        first = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "500.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "500.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert first.status_code == 201, first.text
+
+        second = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "500.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "500.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert second.status_code == 409, second.text
+        assert second.json()["error"]["code"] == "FINANCIAL_INVOICE_TRIP_ALREADY_INVOICED"
+
+    async def test_empty_trips_and_no_delivery_rejected_invoice_never_empty(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+
+        empty = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [], "client_id": client_id, "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "500.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert empty.status_code == 400, empty.text
+        assert empty.json()["error"]["code"] == "FINANCIAL_INVOICE_ORIGIN_MISMATCH"
+
+    async def test_adjustment_requires_reason_and_shifts_total(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        client_id = await _create_client_entity(client, headers)
+        trip_id, _ = await _prepare_invoiceable_trip_for_client(client, headers, tenant_id, category_id, client_id)
+
+        without_reason = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+                "adjustment_value": "-100.00", "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "900.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert without_reason.status_code == 400, without_reason.text
+        assert without_reason.json()["error"]["code"] == "FINANCIAL_INVOICE_ADJUSTMENT_REASON_REQUIRED"
+
+        with_reason = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+                "adjustment_value": "-100.00", "adjustment_reason": "Desconto comercial negociado.",
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "900.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert with_reason.status_code == 201, with_reason.text
+        assert with_reason.json()["gross_value"] == "1000.00"
+        assert with_reason.json()["adjustment_value"] == "-100.00"
+        assert with_reason.json()["total_value"] == "900.00"
 
 
 class TestFinancialReversalFlow:
@@ -1133,7 +1383,7 @@ class TestStatusHistoryAudit:
         create_invoice = await client.post(
             "/api/v1/faturas", headers=headers,
             json={
-                "trip_id": trip_id, "client_id": client_id, "total_value": "100.00",
+                "trips": [{"trip_id": trip_id, "value": "100.00"}], "client_id": client_id,
                 "payment_method_id": str(payment_method_id), "installments": [{"value": "100.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
         )
@@ -1263,7 +1513,7 @@ class TestTripFinancialsFieldLevelRbacAudit:
         invoice = await client.post(
             "/api/v1/faturas", headers=headers,
             json={
-                "trip_id": trip_id, "client_id": client_id, "total_value": "1000.00",
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
                 "payment_method_id": str(payment_method_id), "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
             },
         )

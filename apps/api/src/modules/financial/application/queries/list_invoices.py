@@ -5,9 +5,12 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from modules.financial.application.dtos.invoice_dto import InvoiceDTO
+from modules.financial.application.dtos.invoice_dto import InvoiceDTO, InvoiceTripDTO
 from modules.financial.infrastructure.persistence.repositories.sqlalchemy_invoice_repository import (
     SqlAlchemyInvoiceRepository,
+)
+from modules.financial.infrastructure.persistence.repositories.sqlalchemy_invoice_trip_repository import (
+    SqlAlchemyInvoiceTripRepository,
 )
 from shared_kernel.application.query import Query, QueryHandler
 from shared_kernel.domain.actor import AuthenticatedActor
@@ -40,4 +43,13 @@ class ListInvoicesHandler(QueryHandler[ListInvoicesQuery, ListInvoicesResult]):
                 page=query.page, limit=query.limit, client_id=query.client_id,
                 status=query.status, trip_id=query.trip_id,
             )
-        return ListInvoicesResult(items=[InvoiceDTO.from_entity(i) for i in invoices], total=total)
+            trips_by_invoice = await SqlAlchemyInvoiceTripRepository(session).list_for_invoices_batch(
+                [i.id for i in invoices]
+            )
+        return ListInvoicesResult(
+            items=[
+                InvoiceDTO.from_entity(i, trips=[InvoiceTripDTO.from_entity(t) for t in trips_by_invoice.get(i.id, [])])
+                for i in invoices
+            ],
+            total=total,
+        )

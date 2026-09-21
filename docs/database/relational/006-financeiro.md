@@ -89,7 +89,14 @@ CREATE TABLE contas_bancarias (
 );
 ```
 
-## `faturas`
+## `faturas` e `fatura_viagens`
+
+**Reconciliado (Lote Financeiro, Parte 3 — Faturamento Agrupado)**: `viagem_id` (coluna direta,
+`1 Fatura → 1 Viagem`) removida — substituída por `fatura_viagens`, filha do agregado, suportando
+`1 Fatura → N Viagens`. `entrega_id` (modo alternativo de faturamento) não é tocado. `valor_total`
+deixa de ser uma coluna informada diretamente — passa a ser `valor_bruto + valor_ajuste`, os dois
+também novos, calculados/capturados na criação e nunca alterados depois (mesma imutabilidade de
+sempre, D100).
 
 ```sql
 CREATE TYPE faturas_status_enum AS ENUM ('EMITIDA', 'CANCELADA');
@@ -98,21 +105,41 @@ CREATE TABLE faturas (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id               UUID NOT NULL REFERENCES tenants(id),
     numero_fatura           TEXT NOT NULL,
-    viagem_id               UUID REFERENCES viagens(id),
-    entrega_id              UUID REFERENCES entregas(id),   -- 1 dos 2 obrigatório (faturamento por viagem OU por entrega)
+    entrega_id              UUID REFERENCES entregas(id),   -- modo alternativo — mutuamente exclusivo com fatura_viagens
     cliente_id              UUID NOT NULL REFERENCES clientes(id),
-    valor_total             NUMERIC(14,2) NOT NULL,
+    valor_bruto             NUMERIC(14,2) NOT NULL,   -- soma imutável de fatura_viagens.valor na criação
+    valor_ajuste            NUMERIC(14,2) NOT NULL DEFAULT 0,
+    motivo_ajuste           TEXT,   -- obrigatório na aplicação quando valor_ajuste <> 0
+    valor_total             NUMERIC(14,2) NOT NULL,   -- valor_bruto + valor_ajuste, calculado na criação
     data_emissao            DATE NOT NULL,
     forma_pagamento_id      UUID NOT NULL REFERENCES formas_pagamento(id),
     status                  faturas_status_enum NOT NULL DEFAULT 'EMITIDA',
     criado_em               TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_faturas_tenant_id_numero UNIQUE (tenant_id, numero_fatura),
-    CONSTRAINT ck_faturas_origem CHECK (viagem_id IS NOT NULL OR entrega_id IS NOT NULL)
+    CONSTRAINT uq_faturas_tenant_id_numero UNIQUE (tenant_id, numero_fatura)
     -- valor_total imutável após emitida (D100): reforçado na aplicação, correção via Estorno Financeiro
+    -- ck_faturas_origem removido — "por viagem(ns)" agora se prova pela existência de linhas em
+    -- fatura_viagens (checado na aplicação, não dá para expressar "ao menos uma linha filha" num
+    -- CHECK simples de tabela), "por entrega" continua sendo entrega_id NOT NULL
+);
+
+CREATE TABLE fatura_viagens (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id               UUID NOT NULL REFERENCES tenants(id),
+    fatura_id               UUID NOT NULL REFERENCES faturas(id),
+    viagem_id               UUID NOT NULL REFERENCES viagens(id),
+    valor                   NUMERIC(14,2) NOT NULL,
+    criado_em               TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_fatura_viagens_fatura_id_viagem_id UNIQUE (fatura_id, viagem_id),
+    CONSTRAINT ck_fatura_viagens_valor_positivo CHECK (valor > 0)
+    -- "viagem já faturada não pode entrar novamente" (em outra Fatura não Cancelada) é invariante
+    -- entre agregados — reforçado na aplicação, não expressável como constraint de tabela única
 );
 
 CREATE INDEX idx_faturas_tenant_id_cliente_id ON faturas (tenant_id, cliente_id);
+CREATE INDEX idx_fatura_viagens_tenant_id_viagem_id ON fatura_viagens (tenant_id, viagem_id);
+CREATE INDEX idx_fatura_viagens_fatura_id ON fatura_viagens (fatura_id);
 ```
 
 ## `contas_receber` e `contas_receber_status_history`

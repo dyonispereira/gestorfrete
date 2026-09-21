@@ -22,21 +22,53 @@ funcionar de verdade; antes, `received_value` era aceito pelo schema mas ignorad
 ### `GET /api/v1/faturas`
 
 **Segurança**: `bearerAuth` + `financial.invoice.view`. **Query parameters**: `page`/`limit`,
-`client_id` (`cliente_id`), `status`, `trip_id` (`viagem_id`).
+`client_id` (`cliente_id`), `status`, `trip_id` (`viagem_id` — Reconciliado, Lote Financeiro Parte
+3: passou a fazer `EXISTS` contra `fatura_viagens`, já que a Fatura não tem mais `viagem_id`
+direto).
 
 **Responses**: `200` (`Pagination` de `Invoice`, `financial-schemas.md`), `401`, `403`, `500`.
 
 ### `GET /api/v1/faturas/{id}`
 
-**Responses**: `200`, `401`, `403`, `404`, `500`.
+**Responses**: `200`, `401`, `403`, `404`, `500` — inclui `trips` (array de `InvoiceTrip`, ver
+schema) quando a Fatura é por viagem(ns).
+
+### `GET /api/v1/faturas/viagens-elegiveis` — Reconciliado (Lote Financeiro, Parte 3)
+
+Lista as Viagens de um Cliente prontas para entrar numa Fatura — "a seleção deve mostrar somente
+viagens faturáveis conforme as regras já existentes" (pedido explícito do usuário). Aplica, por
+Viagem: `client_id` bate, ao menos um Canhoto registrado, CT-e emitido
+(`status_fiscal ∈ {CTE_EMITIDO, MDFE_EMITIDO, MDFE_ENCERRADO}`, mesmo critério de sempre), e
+**nenhuma Fatura Viagem existente em Fatura não `CANCELADA`** referenciando essa Viagem (nova
+regra — antes não existia "já faturada" para checar, uma Viagem só podia aparecer numa Fatura
+porque o modelo era 1:1). Lê `freight` (Viagem/Entrega/Canhoto) e a própria `fatura_viagens` —
+nunca lê `documents` diretamente (D008): o `status_fiscal` da Viagem já é a projeção que
+`freight`/`documents` mantêm sincronizada, financial não abre CT-e.
+
+**Segurança**: `financial.invoice.create` (é uma consulta de apoio à criação, mesma permissão).
+**Query parameters**: `client_id` (obrigatório).
+
+**Responses**: `200` (array de `EligibleTrip`: `trip_id`, `codigo`, `data_programada`,
+`suggested_value` — `Trip.receita_prevista_snapshot`, só uma sugestão inicial no formulário, nunca
+o valor final sem confirmação explícita do usuário), `400` (sem `client_id`), `401`, `403`, `500`.
 
 ### `POST /api/v1/faturas`
 
-Cria a Fatura **e** a(s) Conta(s) a Receber correspondente(s) (uma por parcela) numa única
-transação — "faturar" do pedido do usuário é este endpoint, não um endpoint separado. Precondição
-de domínio ("Canhoto(s) registrado(s) e CT-e emitido", `005-FINANCEIRO.md`) é validada pela
-aplicação consultando `documents` (`CanhotoRegistrado`/`CTeEmitido`) — sem endpoint próprio de
-verificação aqui, evento consumido internamente.
+Cria a Fatura, sua(s) Fatura Viagem (uma por Viagem selecionada) **e** a(s) Conta(s) a Receber
+correspondente(s) (uma por parcela) numa única transação — atômica: falha em qualquer validação
+(Viagem inelegível, cliente divergente, Viagem já faturada, duplicata na própria seleção) impede a
+Fatura inteira, nenhuma Viagem fica parcialmente faturada. "Faturar" do pedido do usuário é este
+endpoint, não um endpoint separado. Precondição de domínio ("Canhoto(s) registrado(s) e CT-e
+emitido") é validada pela aplicação consultando `freight` — sem endpoint próprio de verificação
+aqui, mesmo padrão de antes.
+
+**Reconciliado (Lote Financeiro, Parte 3)**: `trip_id` (singular) virou `trips` (array de
+`{trip_id, value}` — cada Viagem selecionada com seu valor faturável explícito, nunca inferido
+silenciosamente). `total_value` deixou de ser aceito — o servidor calcula `valor_bruto` (soma de
+`trips[].value`) e `valor_total = valor_bruto + adjustment_value`; aceitar um total digitado
+independente das origens era exatamente o que o usuário pediu para eliminar. `delivery_id`
+continua existindo, inalterado, mutuamente exclusivo com `trips` (mesma regra de sempre, agora
+validada contra "`trips` não vazio" em vez de "`trip_id` presente").
 
 ```yaml
 requestBody:
@@ -46,10 +78,19 @@ requestBody:
       schema:
         type: object
         properties:
-          trip_id: { $ref: "components/schemas.md#/UUID" }
+          trips:
+            type: array
+            minItems: 1
+            items:
+              type: object
+              properties:
+                trip_id: { $ref: "components/schemas.md#/UUID" }
+                value: { type: string }
+              required: [trip_id, value]
           delivery_id: { $ref: "components/schemas.md#/UUID" }
           client_id: { $ref: "components/schemas.md#/UUID" }
-          total_value: { type: string }
+          adjustment_value: { type: string, default: "0" }
+          adjustment_reason: { type: string, nullable: true }
           payment_method_id: { $ref: "components/schemas.md#/UUID" }
           installments:
             type: array
@@ -59,19 +100,37 @@ requestBody:
                 value: { type: string }
                 due_date: { type: string, format: date }
               required: [value, due_date]
-        required: [client_id, total_value, payment_method_id, installments]
+        required: [client_id, payment_method_id, installments]
 ```
 
-`trip_id`/`delivery_id` — exatamente um dos dois (`ck_faturas_origem`) — `400` caso contrário.
-**Efeito colateral documentado**: quando `trip_id` está presente, cria a Fatura transiciona o
-Status Financeiro da Viagem `AGUARDANDO_FATURAMENTO → FATURADA` (`018-trip-status.md`, dimensão
+`trips` (não vazio) e `delivery_id` — exatamente um dos dois presente —
+`400` (`FINANCIAL_INVOICE_ORIGIN_MISMATCH`) caso contrário.
+`adjustment_reason` obrigatório quando `adjustment_value ≠ "0"` —
+`400` (`FINANCIAL_INVOICE_ADJUSTMENT_REASON_REQUIRED`) caso contrário. Nenhum
+`trip_id` repetido dentro do próprio array `trips` — `400` (`FINANCIAL_INVOICE_DUPLICATE_TRIP`).
+Todas as Viagens de `trips` precisam ter `cliente_id` igual a `client_id` —
+`409` (`FINANCIAL_INVOICE_CLIENT_MISMATCH`) caso alguma divirja. Cada Viagem precisa estar
+elegível (ver `viagens-elegiveis` acima) — `409` (`FINANCIAL_INVOICE_MISSING_PRECONDITION`) quando
+falta Canhoto/CT-e, `409` (`FINANCIAL_INVOICE_TRIP_ALREADY_INVOICED`) quando já há uma Fatura
+Viagem ativa para essa Viagem.
+
+**Efeito colateral documentado**: para cada Viagem em `trips`, a criação transiciona o Status
+Financeiro dessa Viagem `AGUARDANDO_FATURAMENTO → FATURADA` (`018-trip-status.md`, dimensão
 Financeira, já `readOnly` lá) — Financial não escreve `viagens.status_operacional` (regra do
-usuário respeitada), mas **é** o dono de `status_financeiro`, dimensão distinta (D020).
+usuário respeitada), mas **é** o dono de `status_financeiro`, dimensão distinta (D020). Acontece
+depois do commit da transação principal (mesmo padrão cross-module de todo o resto do sistema — D262-style),
+uma chamada por Viagem.
+
+**Compatibilidade**: faturar uma única Viagem é `trips` com um elemento — mesmo endpoint, mesma
+validação, mesmo motor (não existe mais um caminho "individual" separado).
 
 **Segurança**: `financial.invoice.create`. **Idempotency-Key**: obrigatório (D211).
 
-**Responses**: `201` (`Invoice`), `400`, `401`, `403`, `404` (Cliente/Forma de Pagamento/Viagem/
-Entrega não existe), `409` — `FINANCIAL_INVOICE_MISSING_PRECONDITION` (canhoto/CT-e ausente), `500`.
+**Responses**: `201` (`Invoice`, com `trips` no corpo), `400` — `FINANCIAL_INVOICE_ORIGIN_MISMATCH`,
+`FINANCIAL_INVOICE_ADJUSTMENT_REASON_REQUIRED`, `FINANCIAL_INVOICE_DUPLICATE_TRIP`, `401`, `403`,
+`404` (Cliente/Forma de Pagamento/Viagem/Entrega não existe), `409` —
+`FINANCIAL_INVOICE_MISSING_PRECONDITION` (canhoto/CT-e ausente), `FINANCIAL_INVOICE_CLIENT_MISMATCH`,
+`FINANCIAL_INVOICE_TRIP_ALREADY_INVOICED`, `500`.
 
 ### `commands/cancel`
 

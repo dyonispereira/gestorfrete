@@ -150,6 +150,12 @@ demais custos rateados).
 
 ## Fluxos alternativos
 
+- **Faturamento agrupado** (Reconciliado, Lote Financeiro Parte 3): uma Fatura pode cobrir N
+  Viagens do mesmo Cliente, cada uma transicionando `AGUARDANDO_FATURAMENTO → FATURADA`
+  independentemente, na mesma transação de criação da Fatura (atômica — falha em qualquer Viagem
+  impede a Fatura inteira, nenhuma fica parcialmente faturada). Faturar uma única Viagem é o caso
+  N=1 do mesmo mecanismo — não existe um segundo motor de faturamento "individual" à parte. Ver
+  `docs/domain/006-financeiro.md` (entidade Fatura Viagem) e `docs/api/033-accounts-receivable.md`.
 - **Faturamento por entrega individual** (não pela viagem inteira): quando o contrato comercial
   define faturamento por entrega concluída em viagens multi-drop, cada Entrega gera seu próprio
   ciclo `AGUARDANDO_FATURAMENTO → ... → RECEBIDA`, e a convergência para `ENCERRADA` da Viagem

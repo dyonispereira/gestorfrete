@@ -470,17 +470,35 @@ export interface ExpenseAllocation {
 
 export type InvoiceStatus = "EMITIDA" | "CANCELADA";
 
+// Lote Financeiro, Parte 3 — Faturamento Agrupado. `1 Fatura → N Viagens` via `InvoiceTrip`
+// (nunca um array de IDs) — `trip_id` singular na Fatura foi removido, virou `trips[]`.
+export interface InvoiceTrip {
+  id: UUID;
+  trip_id: UUID;
+  value: string;
+}
+
 export interface Invoice {
   id: UUID;
   invoice_number: string;
-  trip_id?: UUID;
   delivery_id?: UUID;
   client_id: UUID;
+  gross_value: string;
+  adjustment_value: string;
+  adjustment_reason?: string;
   total_value: string;
   issue_date: string;
   payment_method_id: UUID;
   status: InvoiceStatus;
+  trips: InvoiceTrip[];
   audit: AuditMetadata;
+}
+
+export interface EligibleTrip {
+  trip_id: UUID;
+  codigo: string;
+  scheduled_date?: string;
+  suggested_value?: string;
 }
 
 export interface InvoiceInstallmentRequest {
@@ -489,11 +507,17 @@ export interface InvoiceInstallmentRequest {
   accounting_period: string;
 }
 
+export interface InvoiceTripRequest {
+  trip_id: UUID;
+  value: string;
+}
+
 export interface CreateInvoiceRequest {
-  trip_id?: UUID;
+  trips: InvoiceTripRequest[];
   delivery_id?: UUID;
   client_id: UUID;
-  total_value: string;
+  adjustment_value?: string;
+  adjustment_reason?: string;
   payment_method_id: UUID;
   installments: InvoiceInstallmentRequest[];
 }

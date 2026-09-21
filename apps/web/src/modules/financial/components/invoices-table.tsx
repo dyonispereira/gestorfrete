@@ -33,7 +33,11 @@ export function InvoicesTable({ invoices, clientNames }: { invoices: Invoice[]; 
               </Link>
             </TableCell>
             <TableCell className="text-muted-foreground">{clientNames.get(invoice.client_id) ?? "—"}</TableCell>
-            <TableCell className="text-muted-foreground">{invoice.trip_id ? "Viagem" : "Entrega"}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {invoice.trips.length > 0
+                ? `${invoice.trips.length} ${invoice.trips.length === 1 ? "Viagem" : "Viagens"}`
+                : "Entrega"}
+            </TableCell>
             <TableCell className="text-muted-foreground">{new Date(invoice.issue_date).toLocaleDateString("pt-BR")}</TableCell>
             <TableCell className="font-medium">{formatMoney(invoice.total_value)}</TableCell>
             <TableCell>

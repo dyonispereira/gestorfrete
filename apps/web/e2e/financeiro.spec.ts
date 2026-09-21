@@ -27,13 +27,18 @@ function uniqueDigits(length: number): string {
   return Date.now().toString().padStart(length, "0").slice(-length);
 }
 
-async function createClient(page: Page, name: string) {
+async function createClient(page: Page, name: string): Promise<string> {
   await page.goto("/clientes");
   await page.getByRole("button", { name: "Novo cliente" }).click();
   await page.fill("#client-razao-social", name);
   await page.fill("#client-document", uniqueDigits(14));
-  await page.getByRole("button", { name: "Criar cliente" }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/clients")),
+    page.getByRole("button", { name: "Criar cliente" }).click(),
+  ]);
+  const client = (await response.json()) as { id: string };
   await expect(page.getByText(name)).toBeVisible({ timeout: 10_000 });
+  return client.id;
 }
 
 async function createDriver(page: Page, name: string) {
@@ -207,6 +212,84 @@ async function allocateAndReleaseTrip(page: Page, driverName: string, plate: str
   await expect(page.getByText("Liberada", { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
+/**
+ * Leva uma Viagem do zero até "elegível para Fatura": aloca recursos, libera via checklist,
+ * despacha (nasce o CT-e, D396), Entrega + Canhoto, e o CT-e até AUTORIZADO via
+ * "Simular resposta SEFAZ" (D397, Lote Fiscal Parte 2.2) — nenhum SQL de estado de negócio.
+ * Retorna `{tripId, codigo}` — `codigo` é necessário para localizar a linha certa no picker de
+ * "Viagens elegíveis" da Parte 3, que lista por `codigo`, não por ID.
+ */
+async function createFullyInvoiceableTrip(
+  page: Page, request: APIRequestContext, clientName: string, driverName: string, plate: string
+): Promise<{ tripId: string; codigo: string }> {
+  await page.goto("/viagens");
+  await page.getByRole("button", { name: "Nova viagem" }).click();
+  await page.getByLabel("Cliente").click();
+  await page.getByRole("option", { name: clientName }).click();
+  const [tripResponse] = await Promise.all([
+    page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/viagens")),
+    page.getByRole("button", { name: "Criar viagem" }).click(),
+  ]);
+  const trip = (await tripResponse.json()) as { id: string };
+  await expect(page.getByText("Viagem criada.")).toBeVisible({ timeout: 10_000 });
+  await page.goto(`/viagens/${trip.id}`);
+
+  await allocateAndReleaseTrip(page, driverName, plate);
+
+  await Promise.all([
+    page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/commands/dispatch")),
+    page.getByRole("button", { name: "Despachar" }).click(),
+  ]);
+  await expect(page.getByText("Viagem despachada.")).toBeVisible({ timeout: 10_000 });
+
+  const adminToken = await getAuthToken(request, "financeiro-admin@e2e-fixture.com");
+  const tripDetailResponse = await request.get(`${API_BASE_URL}/viagens/${trip.id}`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const codigo = (await tripDetailResponse.json()).codigo as string;
+
+  const ctesResponse = await request.get(`${API_BASE_URL}/ctes?trip_id=${trip.id}`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const ctes = (await ctesResponse.json()) as { data: Array<{ id: string }> };
+  const cte = ctes.data[0];
+  if (!cte) throw new Error("CT-e não foi criado no despacho da viagem de teste.");
+
+  await page.getByRole("tab", { name: "Entregas" }).click();
+  await page.getByRole("button", { name: "Nova entrega" }).click();
+  await page.fill("#delivery-order", "1");
+  await page.fill("#delivery-recipient", "Destinatário E2E Financeiro");
+  await page.fill("#delivery-logradouro", "Av. Financeiro");
+  await page.fill("#delivery-cidade", "São Paulo");
+  await page.fill("#delivery-uf", "SP");
+  await page.fill("#delivery-cep", "01000-000");
+  await page.getByRole("button", { name: "Criar entrega" }).click();
+  await expect(page.getByText("Entrega criada.")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Editar" }).click();
+  const editDialog = page.getByRole("dialog");
+  await editDialog.getByLabel("Status").click();
+  await page.getByRole("option", { name: "Concluída" }).click();
+  await editDialog.getByRole("button", { name: "Salvar" }).click();
+  await expect(page.getByText("Entrega atualizada.")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Registrar canhoto" }).click();
+  await expect(page.getByText("Canhoto registrado.")).toBeVisible({ timeout: 10_000 });
+
+  await page.goto(`/ctes/${cte.id}`);
+  await page.getByRole("button", { name: "Validar" }).click();
+  await expect(page.getByText("CT-e validado.")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Assinar" }).click();
+  await expect(page.getByText("CT-e assinado.")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Transmitir" }).click();
+  await expect(page.getByText("CT-e transmitido à SEFAZ.")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Simular resposta SEFAZ" }).click();
+  await expect(page.getByText("Resposta da SEFAZ recebida (simulada).")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Autorizado", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  return { tripId: trip.id, codigo };
+}
+
 test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
   test("OS fechada gera Conta a Pagar automática → aprovação → pagamento → saldo/status corretos", async ({ page }) => {
     await login(page, "financeiro-admin@e2e-fixture.com");
@@ -308,7 +391,9 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
     await expect(page.getByRole("button", { name: "Pagar" })).toHaveCount(0);
   });
 
-  test("Viagem elegível → Fatura → Conta a Receber → baixa parcial → saldo remanescente → baixa final", async ({ page, request }) => {
+  test("Viagem elegível → Fatura (N=1) → Conta a Receber → baixa parcial → saldo remanescente → baixa final", async ({ page, request }) => {
+    // Lote Financeiro, Parte 3 — faturar uma única Viagem é o caso N=1 do mesmo motor de
+    // Faturamento Agrupado (mesmo endpoint, mesmo assistente `/faturas/nova`), não um caminho à parte.
     await login(page, "financeiro-admin@e2e-fixture.com");
     const suffix = Date.now();
     const clientName = `Cliente Financeiro E2E ${suffix}`;
@@ -319,102 +404,36 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
     await createDriver(page, driverName);
     await createVehicle(page, plate);
 
-    await page.goto("/viagens");
-    await page.getByRole("button", { name: "Nova viagem" }).click();
+    const { codigo } = await createFullyInvoiceableTrip(page, request, clientName, driverName, plate);
+
+    await page.goto("/faturas/nova");
     await page.getByLabel("Cliente").click();
     await page.getByRole("option", { name: clientName }).click();
-    const [tripResponse] = await Promise.all([
-      page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/viagens")),
-      page.getByRole("button", { name: "Criar viagem" }).click(),
-    ]);
-    const trip = (await tripResponse.json()) as { id: string };
-    await expect(page.getByText("Viagem criada.")).toBeVisible({ timeout: 10_000 });
-    await page.goto(`/viagens/${trip.id}`);
-
-    await allocateAndReleaseTrip(page, driverName, plate);
-
-    // Não existe `POST /ctes` (D396) — o CT-e nasce como efeito colateral de
-    // `POST /viagens/{id}/commands/dispatch`, que devolve a própria Viagem, não o CT-e criado.
-    // Busca-se o CT-e recém-criado por `trip_id` depois, via API direta (mesmo motivo de
-    // `getAuthToken` no teste de permissão — o `request` fixture não tem a sessão do `page`).
-    await Promise.all([
-      page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/commands/dispatch")),
-      page.getByRole("button", { name: "Despachar" }).click(),
-    ]);
-    await expect(page.getByText("Viagem despachada.")).toBeVisible({ timeout: 10_000 });
-
-    const adminToken = await getAuthToken(request, "financeiro-admin@e2e-fixture.com");
-    const ctesResponse = await request.get(`${API_BASE_URL}/ctes?trip_id=${trip.id}`, {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    });
-    const ctes = (await ctesResponse.json()) as { data: Array<{ id: string }> };
-    const cte = ctes.data[0];
-    if (!cte) throw new Error("CT-e não foi criado no despacho da viagem de teste.");
-
-    // Entrega + Canhoto — via UI real, precondição de Faturamento.
-    await page.getByRole("tab", { name: "Entregas" }).click();
-    await page.getByRole("button", { name: "Nova entrega" }).click();
-    await page.fill("#delivery-order", "1");
-    await page.fill("#delivery-recipient", "Destinatário E2E Financeiro");
-    await page.fill("#delivery-logradouro", "Av. Financeiro");
-    await page.fill("#delivery-cidade", "São Paulo");
-    await page.fill("#delivery-uf", "SP");
-    await page.fill("#delivery-cep", "01000-000");
-    await page.getByRole("button", { name: "Criar entrega" }).click();
-    await expect(page.getByText("Entrega criada.")).toBeVisible({ timeout: 10_000 });
-
-    await page.getByRole("button", { name: "Editar" }).click();
-    const editDialog = page.getByRole("dialog");
-    await editDialog.getByLabel("Status").click();
-    await page.getByRole("option", { name: "Concluída" }).click();
-    await editDialog.getByRole("button", { name: "Salvar" }).click();
-    await expect(page.getByText("Entrega atualizada.")).toBeVisible({ timeout: 10_000 });
-
-    await page.getByRole("button", { name: "Registrar canhoto" }).click();
-    await expect(page.getByText("Canhoto registrado.")).toBeVisible({ timeout: 10_000 });
-
-    // CT-e Autorizado — Lote Fiscal, Parte 2.2 (D397, fechado): rota HTTP real via "Simular
-    // resposta SEFAZ" (SandboxSefazGateway, sempre autoriza), só alcançável depois de
-    // Validar→Assinar→Transmitir (mesma sequência de fiscal.spec.ts). Nenhum SQL de estado de
-    // negócio neste teste — o caminho Viagem→CT-e→Autorizado→Fatura é provado inteiro pela UI.
-    await page.goto(`/ctes/${cte.id}`);
-    await page.getByRole("button", { name: "Validar" }).click();
-    await expect(page.getByText("CT-e validado.")).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Assinar" }).click();
-    await expect(page.getByText("CT-e assinado.")).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Transmitir" }).click();
-    await expect(page.getByText("CT-e transmitido à SEFAZ.")).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Simular resposta SEFAZ" }).click();
-    await expect(page.getByText("Resposta da SEFAZ recebida (simulada).")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Autorizado", { exact: true })).toBeVisible({ timeout: 10_000 });
-
-    await page.goto("/faturas");
-    await page.getByRole("button", { name: "Nova fatura" }).click();
-    await page.getByLabel("Cliente").click();
-    await page.getByRole("option", { name: clientName }).click();
-    await page.getByLabel("Viagem").click();
-    await page.getByRole("option", { name: new RegExp("^VG-") }).click();
+    const tripRow = page.getByRole("row").filter({ hasText: codigo });
+    await expect(tripRow).toBeVisible({ timeout: 10_000 });
+    await tripRow.getByRole("checkbox").click();
+    await tripRow.locator('input[type="number"]').fill("1000");
     await page.getByLabel("Forma de pagamento").click();
     await page.getByRole("option", { name: "PIX" }).click();
-    await page.fill("#installment-value-0", "600");
-    await page.fill("#installment-due-0", "2026-12-01");
-    await page.fill("#installment-competencia-0", "2026-12-01");
+    await page.fill("#new-invoice-installment-value-0", "600");
+    await page.fill("#new-invoice-installment-due-0", "2026-12-01");
+    await page.fill("#new-invoice-installment-competencia-0", "2026-12-01");
     await page.getByRole("button", { name: "Adicionar parcela" }).click();
-    await page.fill("#installment-value-1", "400");
-    await page.fill("#installment-due-1", "2026-12-15");
-    await page.fill("#installment-competencia-1", "2026-12-01");
+    await page.fill("#new-invoice-installment-value-1", "400");
+    await page.fill("#new-invoice-installment-due-1", "2026-12-15");
+    await page.fill("#new-invoice-installment-competencia-1", "2026-12-01");
+    await expect(page.locator("aside").getByText("R$ 1.000,00").first()).toBeVisible(); // Total da Fatura, resumo lateral
 
-    const [invoiceResponse] = await Promise.all([
-      page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/faturas")),
-      page.getByRole("button", { name: "Criar fatura" }).click(),
-    ]);
+    await page.getByRole("button", { name: "Gerar Fatura" }).click();
     await expect(page.getByText("Fatura criada.")).toBeVisible({ timeout: 10_000 });
-    const invoice = (await invoiceResponse.json()) as { id: string };
-    await page.goto(`/faturas/${invoice.id}`);
+    await page.waitForURL(/\/faturas\/[0-9a-f-]+$/);
 
-    // Aparece em breadcrumb + "Valor total" + resumo "Faturado"/"Saldo" (saldo == total antes de
-    // qualquer baixa) — `.first()` só confirma presença, não unicidade.
+    // "Valor total" aparece na aba Cabeçalho (ativa por padrão) — `.first()` só confirma presença.
     await expect(page.getByText("R$ 1.000,00").first()).toBeVisible({ timeout: 10_000 });
+
+    // Financeiro (Contas a Receber) fica numa aba própria (Cabeçalho / Itens Faturados /
+    // Financeiro, Lote Financeiro Parte 3) — TabsContent inativo não fica no DOM.
+    await page.getByRole("tab", { name: "Financeiro" }).click();
 
     // Baixa parcial real de UMA parcela isolada (Lote Financeiro, Parte 2.1) — a parcela de R$ 600
     // recebe R$ 300 e permanece com R$ 300 em aberto, sem virar Recebida. `Valor` (600) nunca muda
@@ -447,6 +466,160 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
     // confirma presença.
     await expect(page.getByText("R$ 0,00").first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("button", { name: "Confirmar recebimento" })).toHaveCount(0);
+  });
+
+  test("Faturamento Agrupado: 2 viagens do mesmo cliente → 1 Fatura → receita nunca dobra", async ({ page, request }) => {
+    // Lote Financeiro, Parte 3 — o teste principal pedido: 2 viagens → 2 CT-es autorizados →
+    // canhotos → seleção conjunta → 1 Fatura → CR → baixa parcial → baixa total, com a receita
+    // rateada corretamente entre as viagens (nunca duplicada), mais os bloqueios pedidos.
+    // Timeout maior que o default (30s): este teste percorre DUAS viagens completas até CT-e
+    // autorizado (cada uma já é, sozinha, o essencial de outros testes deste arquivo).
+    test.setTimeout(120_000);
+    await login(page, "financeiro-admin@e2e-fixture.com");
+    const suffix = Date.now();
+    const clientName = `Cliente Agrupado E2E ${suffix}`;
+    const otherClientName = `Cliente Agrupado Outro E2E ${suffix}`;
+    const driverAName = `Motorista Agrupado A E2E ${suffix}`;
+    const driverBName = `Motorista Agrupado B E2E ${suffix}`;
+    const driverCName = `Motorista Agrupado C E2E ${suffix}`;
+    const plateA = `GA${suffix.toString().slice(-5)}`;
+    const plateB = `GB${suffix.toString().slice(-5)}`;
+    const plateC = `GC${suffix.toString().slice(-5)}`;
+
+    const clientId = await createClient(page, clientName);
+    const otherClientId = await createClient(page, otherClientName);
+    await createDriver(page, driverAName);
+    await createDriver(page, driverBName);
+    await createDriver(page, driverCName);
+    await createVehicle(page, plateA);
+    await createVehicle(page, plateB);
+    await createVehicle(page, plateC);
+
+    const tripA = await createFullyInvoiceableTrip(page, request, clientName, driverAName, plateA);
+    const tripB = await createFullyInvoiceableTrip(page, request, clientName, driverBName, plateB);
+
+    // Viagem inelegível (sem Canhoto/CT-e) do mesmo cliente — não pode aparecer no picker.
+    await page.goto("/viagens");
+    await page.getByRole("button", { name: "Nova viagem" }).click();
+    await page.getByLabel("Cliente").click();
+    await page.getByRole("option", { name: clientName }).click();
+    const [ineligibleTripResponse] = await Promise.all([
+      page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/viagens")),
+      page.getByRole("button", { name: "Criar viagem" }).click(),
+    ]);
+    const ineligibleTrip = (await ineligibleTripResponse.json()) as { id: string };
+    await expect(page.getByText("Viagem criada.")).toBeVisible({ timeout: 10_000 });
+
+    const adminToken = await getAuthToken(request, "financeiro-admin@e2e-fixture.com");
+    const ineligibleDetail = await request.get(`${API_BASE_URL}/viagens/${ineligibleTrip.id}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const ineligibleCodigo = (await ineligibleDetail.json()).codigo as string;
+    const paymentMethodsResponse = await request.get(`${API_BASE_URL}/formas-pagamento`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const paymentMethodId = (await paymentMethodsResponse.json()).data[0].id as string;
+
+    // Bloqueio: cliente diferente — direto pela API, mesmo padrão do teste de permissão acima.
+    const clientMismatch = await request.post(`${API_BASE_URL}/faturas`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: {
+        trips: [{ trip_id: tripA.tripId, value: "600.00" }], client_id: otherClientId,
+        payment_method_id: paymentMethodId,
+        installments: [{ value: "600.00", due_date: "2026-12-01", accounting_period: "2026-12-01" }],
+      },
+    });
+    expect(clientMismatch.status()).toBe(409);
+    expect((await clientMismatch.json()).error.code).toBe("FINANCIAL_INVOICE_CLIENT_MISMATCH");
+
+    // Bloqueio: duplicata dentro da própria seleção.
+    const duplicateTrip = await request.post(`${API_BASE_URL}/faturas`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: {
+        trips: [{ trip_id: tripA.tripId, value: "300.00" }, { trip_id: tripA.tripId, value: "300.00" }],
+        client_id: clientId, payment_method_id: paymentMethodId,
+        installments: [{ value: "600.00", due_date: "2026-12-01", accounting_period: "2026-12-01" }],
+      },
+    });
+    expect(duplicateTrip.status()).toBe(400);
+    expect((await duplicateTrip.json()).error.code).toBe("FINANCIAL_INVOICE_DUPLICATE_TRIP");
+
+    // Picker de Viagens elegíveis: mostra as 2 elegíveis, esconde a inelegível.
+    await page.goto("/faturas/nova");
+    await page.getByLabel("Cliente").click();
+    await page.getByRole("option", { name: clientName }).click();
+    const rowA = page.getByRole("row").filter({ hasText: tripA.codigo });
+    const rowB = page.getByRole("row").filter({ hasText: tripB.codigo });
+    await expect(rowA).toBeVisible({ timeout: 10_000 });
+    await expect(rowB).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("row").filter({ hasText: ineligibleCodigo })).toHaveCount(0);
+
+    await rowA.getByRole("checkbox").click();
+    await rowA.locator('input[type="number"]').fill("600");
+    await rowB.getByRole("checkbox").click();
+    await rowB.locator('input[type="number"]').fill("400");
+    await expect(page.locator("aside").getByText("R$ 1.000,00").first()).toBeVisible(); // Total da Fatura, resumo lateral
+
+    await page.getByLabel("Forma de pagamento").click();
+    await page.getByRole("option", { name: "PIX" }).click();
+    await page.fill("#new-invoice-installment-value-0", "1000");
+    await page.fill("#new-invoice-installment-due-0", "2026-12-01");
+    await page.fill("#new-invoice-installment-competencia-0", "2026-12-01");
+
+    await page.getByRole("button", { name: "Gerar Fatura" }).click();
+    await expect(page.getByText("Fatura criada.")).toBeVisible({ timeout: 10_000 });
+    await page.waitForURL(/\/faturas\/[0-9a-f-]+$/);
+    const invoiceUrl = page.url();
+
+    // Bloqueio: Viagem já faturada não pode entrar numa segunda Fatura.
+    const alreadyInvoiced = await request.post(`${API_BASE_URL}/faturas`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: {
+        trips: [{ trip_id: tripA.tripId, value: "100.00" }], client_id: clientId,
+        payment_method_id: paymentMethodId,
+        installments: [{ value: "100.00", due_date: "2026-12-01", accounting_period: "2026-12-01" }],
+      },
+    });
+    expect(alreadyInvoiced.status()).toBe(409);
+    expect((await alreadyInvoiced.json()).error.code).toBe("FINANCIAL_INVOICE_TRIP_ALREADY_INVOICED");
+
+    // Aba Itens Faturados — as duas Viagens aparecem, rastreáveis (Fatura → Item → Viagem).
+    await page.getByRole("tab", { name: "Itens Faturados" }).click();
+    await expect(page.getByRole("link", { name: tripA.codigo })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("link", { name: tripB.codigo })).toBeVisible({ timeout: 10_000 });
+
+    // Baixa parcial: 300 de 1000 (30%) — rateado proporcionalmente (180/120), nunca 300 em cada Viagem.
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await page.getByRole("button", { name: "Confirmar recebimento" }).click();
+    const paymentDialog = page.getByRole("dialog");
+    await paymentDialog.getByLabel("Valor recebido").fill("300");
+    await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+
+    await page.goto(`/viagens/${tripA.tripId}`);
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await expect(page.getByText("R$ 180,00")).toBeVisible({ timeout: 10_000 }); // Receita realizada de A
+    await page.goto(`/viagens/${tripB.tripId}`);
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await expect(page.getByText("R$ 120,00")).toBeVisible({ timeout: 10_000 }); // Receita realizada de B
+    // 180 + 120 = 300 — exatamente o que foi recebido, nunca 300 duplicado em cada Viagem.
+
+    // Baixa final: os 700 restantes.
+    await page.goto(invoiceUrl);
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await page.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
+    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+
+    await page.goto(`/viagens/${tripA.tripId}`);
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await expect(page.getByText("R$ 600,00").first()).toBeVisible({ timeout: 10_000 }); // Receita realizada final de A
+    await expect(page.getByText("Recebida", { exact: true })).toBeVisible();
+    await page.goto(`/viagens/${tripB.tripId}`);
+    await page.getByRole("tab", { name: "Financeiro" }).click();
+    await expect(page.getByText("R$ 400,00").first()).toBeVisible({ timeout: 10_000 }); // Receita realizada final de B
+    await expect(page.getByText("Recebida", { exact: true })).toBeVisible();
+    // 600 + 400 = 1000 — exatamente o total da Fatura, nunca 1000 em cada Viagem.
   });
 
   test("Estorno mostra quem registrou — resolvido via logs_auditoria, sem duplicar coluna", async ({ page }) => {

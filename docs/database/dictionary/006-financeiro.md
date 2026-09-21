@@ -25,10 +25,13 @@ Dono: `financial` · Natureza: Transactional Data · Aggregate Root.
 
 | Atributo | Nome | Tipo Conceitual | Obrigatório | Origem | Histórico | Classificação | Observações |
 |---|---|---|---|---|---|---|---|
-| FATURA.VIAGEM_ID / ENTREGA_ID | Viagem ou Entrega faturada | Referência | Sim (um dos dois) | Capturado (sistema) | Não | Interno | Depende do modo de faturamento do contrato (por viagem inteira ou por entrega, [`005-FINANCEIRO.md`](../../flows/005-FINANCEIRO.md), Fluxos alternativos) |
-| FATURA.CLIENTE_ID | Cliente | Referência | Sim | Capturado (sistema) | Não | Interno | FK |
+| FATURA.ENTREGA_ID | Entrega faturada (modo alternativo) | Referência | Não | Capturado (sistema) | Não | Interno | Mutuamente exclusivo com as Fatura Viagem abaixo (um Fatura é por viagem(ns) OU por entrega, nunca os dois) — fluxo alternativo inalterado pela Parte 3 |
+| FATURA.CLIENTE_ID | Cliente | Referência | Sim | Capturado (sistema) | Não | Interno | FK. **Reconciliado (Lote Financeiro, Parte 3)**: todas as Fatura Viagem desta Fatura precisam ter `VIAGEM.CLIENTE_ID` igual a este — invariante de aplicação, checado na criação |
 | FATURA.NUMERO_FATURA | Número da fatura | Texto Curto | Sim | Capturado (sistema) | Não | Interno | Único por tenant, para sempre (D084 — nunca reaproveitado, mesmo após `Cancelada`) |
-| FATURA.VALOR_TOTAL | Valor total faturado | Monetário | Sim | Capturado, no momento da emissão (transição `AGUARDANDO_FATURAMENTO → FATURADA`) | Não — imutável após emitida; correção é por Estorno Financeiro (D100) | Financeiro | D097 — valor do quê (total faturado desta Fatura), em qual moeda (BRL, D075), em qual momento (emissão). **Atributo Crítico (D077)** — ver Governança abaixo |
+| FATURA.VALOR_BRUTO | Soma dos valores das Fatura Viagem | Monetário | Sim | Calculado, na criação (soma imutável) | Não | Financeiro | Reconciliado (Lote Financeiro, Parte 3) — nunca recalculado depois de emitida |
+| FATURA.VALOR_AJUSTE | Ajuste explícito (desconto/acréscimo) | Monetário | Sim (default 0) | Informado, na criação | Não | Financeiro | Reconciliado (Lote Financeiro, Parte 3) — positivo (acréscimo) ou negativo (desconto); nunca aplicado silenciosamente no total |
+| FATURA.MOTIVO_AJUSTE | Motivo do ajuste | Texto Longo | Condicional | Informado, na criação | Não | Interno | Reconciliado (Lote Financeiro, Parte 3) — obrigatório quando `VALOR_AJUSTE ≠ 0` |
+| FATURA.VALOR_TOTAL | Valor total faturado | Monetário | Sim | Calculado, no momento da emissão (`VALOR_BRUTO + VALOR_AJUSTE`) | Não — imutável após emitida; correção é por Estorno Financeiro (D100) | Financeiro | D097 — valor do quê (total faturado desta Fatura), em qual moeda (BRL, D075), em qual momento (emissão). **Atributo Crítico (D077)** — ver Governança abaixo. **Reconciliado (Lote Financeiro, Parte 3)**: deixou de ser informado diretamente — sempre derivado |
 | FATURA.DATA_EMISSAO | Data de emissão | Data | Sim | Capturado (sistema) | Não | Interno | Granularidade: dia (D074) |
 | FATURA.FORMA_PAGAMENTO_ID | Forma de pagamento combinada | Referência | Sim | Informado | Não | Interno | FK para Forma de Pagamento |
 | FATURA.STATUS | Status | Enum | Sim | Calculado | Sim | Interno | Valores: `Emitida`/`Cancelada` — cancelamento gera nova Fatura, nunca reabre a anterior |
@@ -38,6 +41,23 @@ Dono: `financial` · Natureza: Transactional Data · Aggregate Root.
 | Quem altera? | Quando muda? | Quem pode visualizar? | Quem nunca altera? |
 |---|---|---|---|
 | `financial` (Faturista), uma única vez, na emissão | Nunca muda depois de emitida — correção é sempre um novo Estorno Financeiro, nunca edição (D100) | Financeiro sempre; demais perfis conforme RBAC | Frontend (D027); Motorista, Gestor Operacional (apenas consultam) |
+
+---
+
+## Fatura Viagem
+
+Dono: `financial` · Natureza: Transactional Data · Filha do agregado Fatura (não é Aggregate Root).
+
+**Reconciliado (Lote Financeiro, Parte 3 — Faturamento Agrupado)**: substitui `FATURA.VIAGEM_ID`
+(coluna direta, removida) — modelo anterior só suportava `1 Fatura → 1 Viagem`. Opção descartada
+antes de desenhar (pedido explícito do usuário): array/JSON de `viagem_ids` na própria Fatura —
+relação implícita, sem FK/UNIQUE reais, não auditável, não indexável por Viagem.
+
+| Atributo | Nome | Tipo Conceitual | Obrigatório | Origem | Histórico | Classificação | Observações |
+|---|---|---|---|---|---|---|---|
+| FATURA_VIAGEM.FATURA_ID | Fatura | Referência | Sim | Capturado (sistema) | Não | Interno | FK, imutável |
+| FATURA_VIAGEM.VIAGEM_ID | Viagem incluída | Referência | Sim | Capturado (sistema) | Não | Interno | FK, imutável. `UNIQUE(FATURA_ID, VIAGEM_ID)` — nunca duplicada dentro da mesma Fatura |
+| FATURA_VIAGEM.VALOR | Valor faturável desta Viagem nesta Fatura | Monetário | Sim | Informado, na criação da Fatura | Não | Financeiro | D097 — valor desta Viagem dentro desta Fatura, moeda BRL (D075), no momento da emissão. Nunca editado depois — correção via Estorno Financeiro |
 
 ---
 

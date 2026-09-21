@@ -36,32 +36,40 @@ reembolso), nunca por inferência.
 
 ## Fatura
 
-- **Objetivo**: Representa o documento de cobrança emitido ao Cliente para uma Viagem (ou conjunto
-  de Entregas, no fluxo alternativo de faturamento por entrega) — o artefato concreto criado na
-  transição `AGUARDANDO_FATURAMENTO → FATURADA` do Status Financeiro da Viagem.
-- **Responsabilidades**: Guardar valor faturado, data de emissão, forma de pagamento combinada;
-  originar uma ou mais Contas a Receber (parcelamento).
+- **Objetivo**: Representa o documento de cobrança emitido ao Cliente para uma ou mais Viagens (ou
+  conjunto de Entregas, no fluxo alternativo de faturamento por entrega, inalterado nesta
+  reconciliação) — o artefato concreto criado na transição `AGUARDANDO_FATURAMENTO → FATURADA` do
+  Status Financeiro de cada Viagem envolvida.
+- **Responsabilidades**: Guardar data de emissão, forma de pagamento combinada, ajuste explícito
+  (quando houver); originar uma ou mais Contas a Receber (parcelamento) e uma ou mais Fatura Viagem
+  (itens, quando o modo é por viagem).
 - **O que não faz**: Não é o mesmo que o Status Financeiro da Viagem (esse é o ciclo macro, já
   modelado em `002-operacao.md`) — é o documento concreto emitido dentro desse ciclo; não substitui
   o CT-e (documento fiscal, `documents`).
 - **Aggregate Root**: Sim.
 - **Bounded Context proprietário**: `financial`
-- **Principais relacionamentos**: Viagem ou Entrega (referenciada, N:1 — depende do modo de
-  faturamento do contrato); Cliente (referenciado); Forma de Pagamento (referenciada); Conta a
-  Receber (1:N, filhas do agregado).
+- **Principais relacionamentos**: Fatura Viagem (1:N, filhas do agregado, quando por viagem) ou
+  Entrega (referenciada, N:1, quando por entrega — os dois modos continuam mutuamente exclusivos,
+  `ck_faturas_origem`); Cliente (referenciado); Forma de Pagamento (referenciada); Conta a Receber
+  (1:N, filhas do agregado).
 - **Eventos que publica**: `FaturamentoGerado` (já catalogado em
   [`../product/EVENT_MAP.md`](../product/EVENT_MAP.md)).
 - **Eventos que consome**: `CanhotoRegistrado`, `CTeEmitido` (`documents`/`freight`) — condições que
-  habilitam a emissão.
-- **Invariantes**: uma Fatura só é emitida com ao menos um Canhoto registrado e o CT-e
-  correspondente emitido; valor faturado maior que zero.
+  habilitam a emissão, verificadas por Viagem incluída.
+- **Invariantes**: uma Fatura só é emitida com ao menos uma Fatura Viagem (ou uma Entrega, no modo
+  alternativo) — **nunca vazia**; cada Viagem incluída tem ao menos um Canhoto registrado e o CT-e
+  correspondente emitido; todas as Viagens incluídas pertencem ao mesmo Cliente da Fatura; uma
+  Viagem não pode aparecer duas vezes na mesma Fatura (`uq_fatura_viagens_fatura_id_viagem_id`);
+  uma Viagem já vinculada a outra Fatura não `Cancelada` não pode ser incluída novamente; valor
+  faturado maior que zero; criação é atômica — falha em qualquer Viagem da seleção impede a Fatura
+  inteira (nenhuma Viagem fica parcialmente faturada).
 - **Regras de negócio associadas**: D019/D020 (Status Financeiro da Viagem), D097 (todo valor
   monetário indica do quê, em qual moeda e em qual momento), D098 (Receita Prevista não é
   substituída pela Fatura — coexistem).
 - **Estados**: `Emitida` / `Cancelada` (cancelamento gera nova Fatura, nunca reabre a anterior —
   mesmo princípio de imutabilidade pós-terminal já usado em Cotação).
 - **Auditoria**: D007.
-- **Linha do tempo**: parte da Timeline Universal da Viagem (D022).
+- **Linha do tempo**: parte da Timeline Universal de cada Viagem envolvida (D022).
 - **Anexos suportados**: PDF da fatura, comprovante de envio ao cliente (D024).
 - **Comentários suportados**: Sim, negociação de prazo/desconto (D023).
 - **KPIs relacionados**: prazo médio entre emissão e recebimento (o indicador em si vive em
@@ -69,12 +77,69 @@ reembolso), nunca por inferência.
 - **Documentos canônicos relacionados**: `005-FINANCEIRO.md`.
 - **Evoluções futuras previstas**: emissão eletrônica direta ao gateway de cobrança (PIX/boleto
   automatizado).
-- **Dependências obrigatórias**: Viagem (ou Entrega), Cliente, Forma de Pagamento.
+- **Dependências obrigatórias**: ao menos uma Viagem (ou uma Entrega, modo alternativo), Cliente,
+  Forma de Pagamento.
 - **Dependências proibidas**: Ordem de Serviço, Pneu, CT-e (referenciado apenas por evento, nunca
   lido diretamente — D008).
-- **Dono da Timeline**: Aggregate Viagem (a Fatura contribui à timeline da Viagem, não tem timeline
-  própria isolada).
+- **Dono da Timeline**: Aggregate Viagem (a Fatura contribui à timeline de cada Viagem envolvida,
+  não tem timeline própria isolada).
 - **Capacidade Offline**: Não (D039) — emissão exige conectividade e integração com gateway.
+
+**Reconciliado (Lote Financeiro, Parte 3 — Faturamento Agrupado)**: o modelo original era `1
+Fatura → 1 Viagem` (`faturas.viagem_id`, FK direta). Investigado antes de desenhar (pedido
+explícito do usuário) — confirmado que não havia nenhuma associação formal para N Viagens; a opção
+descartada foi um array/JSON de `viagem_ids` na própria Fatura (relação implícita, não auditável,
+sem `FK`/`UNIQUE` reais, impossível de consultar por Viagem com índice). Em vez disso, nova
+entidade filha:
+
+## Fatura Viagem
+
+- **Objetivo**: Representa a inclusão de uma Viagem específica numa Fatura — o "item" faturado,
+  equivalente ao que `Item de Ordem de Serviço` já é para `Ordem de Serviço` (mesmo padrão de
+  agregado-com-itens já usado em `004-manutencao.md`).
+- **Responsabilidades**: Fixar o valor faturável desta Viagem dentro desta Fatura (explícito,
+  capturado na criação — nunca recalculado depois); ser o ponto de rastreabilidade Fatura → Item →
+  Viagem (e, por navegação a partir da Viagem, → Entrega → CT-e, sem duplicar dado fiscal aqui —
+  D008 mantido: `financial` nunca vira proprietária de fato fiscal, só referencia `viagem_id`).
+- **O que não faz**: Não referencia Entrega nem CT-e diretamente — essa navegação acontece a partir
+  da própria Viagem (já expõe suas Entregas e seu CT-e), não duplicada aqui.
+- **Aggregate Root**: Não — parte do agregado Fatura.
+- **Bounded Context proprietário**: `financial`
+- **Principais relacionamentos**: Fatura (N:1); Viagem (referenciada, N:1 — nunca mais de uma
+  Fatura Viagem não cancelada por Viagem, ver invariante acima).
+- **Eventos que publica**: Nenhum próprio — a Fatura publica `FaturamentoGerado` uma vez, cobrindo
+  todos os itens.
+- **Eventos que consome**: Nenhum.
+- **Invariantes**: `valor > 0`; imutável após criada (mesmo princípio de `valor_total` da Fatura,
+  D100) — correção é por Estorno Financeiro, nunca edição direta.
+- **Regras de negócio associadas**: D098 (o valor aqui é o valor faturado desta Viagem nesta
+  Fatura — não substitui nem é substituído pela Receita Prevista/Realizada da própria Viagem, que
+  continuam existindo em paralelo em `002-operacao.md`).
+- **Estados**: Nenhum — nasce e permanece, nunca transiciona (a Fatura como um todo é que cancela).
+- **Auditoria**: D007 (via `AuditLogger` na criação da Fatura, mesmo registro que cobre os demais
+  filhos criados na mesma transação).
+- **Linha do tempo**: parte da Fatura/Viagem.
+- **Anexos/Comentários suportados**: Não — a Fatura é quem carrega esses recursos, não cada item.
+- **Documentos canônicos relacionados**: `005-FINANCEIRO.md`.
+- **Evoluções futuras previstas**: Nenhuma isolada.
+- **Dependências obrigatórias**: Fatura, Viagem.
+- **Dependências proibidas**: Entrega, CT-e (acessíveis só por navegação via Viagem, nunca FK
+  direta aqui — D008).
+- **Dono da Timeline**: Aggregate Fatura/Viagem.
+- **Capacidade Offline**: Não.
+
+**Ajuste explícito da Fatura**: `VALOR_BRUTO` (soma imutável dos valores das Fatura Viagem no
+momento da criação) e `VALOR_AJUSTE`/`MOTIVO_AJUSTE` (opcional, default zero — desconto/acréscimo
+negociado, nunca aplicado silenciosamente; `MOTIVO_AJUSTE` obrigatório quando `VALOR_AJUSTE ≠ 0`).
+`VALOR_TOTAL = VALOR_BRUTO + VALOR_AJUSTE`, sempre — nunca um valor digitado independente das
+origens.
+
+**Compatibilidade com faturamento individual (N=1)**: faturar uma única Viagem passa a ser o caso
+particular de uma Fatura com exatamente uma Fatura Viagem — mesmo comando, mesma validação, mesmo
+motor. `faturas.viagem_id` (coluna antiga) é removido nesta Parte, não mantido como atalho
+paralelo — evita dois motores de faturamento divergentes (pedido explícito do usuário). O modo
+"por entrega" (`entrega_id`) não é tocado por esta reconciliação — segue exatamente como estava,
+fluxo alternativo e independente.
 
 ## Conta a Receber
 

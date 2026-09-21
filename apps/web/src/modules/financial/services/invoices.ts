@@ -1,5 +1,5 @@
 import { apiFetch } from "@/shared/lib/api-client";
-import type { CreateInvoiceRequest, Invoice, PaginatedResponse } from "@gestorfrete/types";
+import type { CreateInvoiceRequest, EligibleTrip, Invoice, PaginatedResponse } from "@gestorfrete/types";
 
 export interface ListInvoicesParams {
   page?: number;
@@ -24,6 +24,12 @@ export function listInvoices(params: ListInvoicesParams = {}): Promise<Paginated
 
 export function getInvoice(id: string): Promise<Invoice> {
   return apiFetch<Invoice>(`/faturas/${id}`);
+}
+
+/** Lote Financeiro, Parte 3 — "a seleção deve mostrar somente viagens faturáveis conforme as
+ * regras já existentes" (pedido explícito do usuário). */
+export function listEligibleTrips(clientId: string): Promise<EligibleTrip[]> {
+  return apiFetch<EligibleTrip[]>(`/faturas/viagens-elegiveis?client_id=${clientId}`);
 }
 
 export function createInvoice(body: CreateInvoiceRequest): Promise<Invoice> {

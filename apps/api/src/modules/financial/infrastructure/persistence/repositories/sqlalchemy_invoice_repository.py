@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.multitenancy.context import get_current_tenant_id
 from modules.financial.domain.entities.invoice import Invoice
 from modules.financial.domain.repositories.invoice_repository import InvoiceRepository
 from modules.financial.domain.value_objects.invoice_status import InvoiceStatus
-from modules.financial.infrastructure.persistence.models.invoice_model import InvoiceModel
+from modules.financial.infrastructure.persistence.models.invoice_model import InvoiceModel, InvoiceTripModel
 from shared_kernel.domain.audit_metadata import AuditMetadata
 from shared_kernel.domain.specification import Specification
 
 
 def _to_entity(model: InvoiceModel) -> Invoice:
     return Invoice(
-        id=model.id, numero_fatura=model.numero_fatura, viagem_id=model.viagem_id, entrega_id=model.entrega_id,
-        cliente_id=model.cliente_id, valor_total=model.valor_total, data_emissao=model.data_emissao,
+        id=model.id, numero_fatura=model.numero_fatura, entrega_id=model.entrega_id,
+        cliente_id=model.cliente_id, valor_bruto=model.valor_bruto, valor_ajuste=model.valor_ajuste,
+        motivo_ajuste=model.motivo_ajuste, valor_total=model.valor_total, data_emissao=model.data_emissao,
         forma_pagamento_id=model.forma_pagamento_id, status=InvoiceStatus(model.status),
         audit=AuditMetadata(
             created_at=model.criado_em, created_by=model.criado_por, updated_at=model.atualizado_em,
@@ -51,7 +52,11 @@ class SqlAlchemyInvoiceRepository(InvoiceRepository):
         if status is not None:
             stmt = stmt.where(InvoiceModel.status == status)
         if trip_id is not None:
-            stmt = stmt.where(InvoiceModel.viagem_id == trip_id)
+            # Reconciliado (Lote Financeiro, Parte 3) — `faturas` não tem mais `viagem_id` direto;
+            # o filtro passa a ser EXISTS contra `fatura_viagens`.
+            stmt = stmt.where(
+                exists().where(InvoiceTripModel.fatura_id == InvoiceModel.id, InvoiceTripModel.viagem_id == trip_id)
+            )
 
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await self._session.execute(count_stmt)).scalar_one()
@@ -67,9 +72,11 @@ class SqlAlchemyInvoiceRepository(InvoiceRepository):
             model = InvoiceModel(id=aggregate.id, tenant_id=tenant_id)
             self._session.add(model)
         model.numero_fatura = aggregate.numero_fatura
-        model.viagem_id = aggregate.viagem_id
         model.entrega_id = aggregate.entrega_id
         model.cliente_id = aggregate.cliente_id
+        model.valor_bruto = aggregate.valor_bruto
+        model.valor_ajuste = aggregate.valor_ajuste
+        model.motivo_ajuste = aggregate.motivo_ajuste
         model.valor_total = aggregate.valor_total
         model.data_emissao = aggregate.data_emissao
         model.forma_pagamento_id = aggregate.forma_pagamento_id

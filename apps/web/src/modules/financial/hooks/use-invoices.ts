@@ -20,6 +20,14 @@ export function useInvoiceQuery(id: string | undefined) {
   });
 }
 
+export function useEligibleTripsQuery(clientId: string | undefined) {
+  return useQuery({
+    queryKey: ["invoices", "viagens-elegiveis", clientId],
+    queryFn: () => invoicesService.listEligibleTrips(clientId as string),
+    enabled: Boolean(clientId),
+  });
+}
+
 export function useCreateInvoiceMutation() {
   const queryClient = useQueryClient();
   return useMutation({
