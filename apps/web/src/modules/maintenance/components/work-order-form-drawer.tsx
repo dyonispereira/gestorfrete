@@ -22,7 +22,10 @@ import {
 import type { WorkOrderType } from "@gestorfrete/types";
 
 import { useVehiclesQuery } from "@/modules/fleet/hooks/use-vehicles";
+import { useSuppliersQuery } from "@/modules/maintenance/hooks/use-suppliers";
 import { useCreateWorkOrderMutation } from "@/modules/maintenance/hooks/use-work-orders";
+import { useCostCentersQuery } from "@/modules/financial/hooks/use-cost-centers";
+import { useChartOfAccountsListQuery } from "@/modules/financial/hooks/use-chart-of-accounts";
 import { ApiError } from "@/shared/lib/api-client";
 
 const TYPE_LABEL: Record<WorkOrderType, string> = {
@@ -44,9 +47,15 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
   const [type, setType] = React.useState<WorkOrderType>("CORRETIVA");
   const [problemDescription, setProblemDescription] = React.useState("");
   const [openingOdometerKm, setOpeningOdometerKm] = React.useState("");
+  const [supplierId, setSupplierId] = React.useState("");
+  const [costCenterId, setCostCenterId] = React.useState("");
+  const [chartOfAccountsId, setChartOfAccountsId] = React.useState("");
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const vehiclesQuery = useVehiclesQuery({ limit: 100 });
+  const suppliersQuery = useSuppliersQuery({ limit: 100 });
+  const costCentersQuery = useCostCentersQuery({ limit: 100 });
+  const chartQuery = useChartOfAccountsListQuery({ limit: 100, type: "DESPESA" });
   const createWorkOrder = useCreateWorkOrderMutation();
 
   function reset() {
@@ -54,6 +63,9 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
     setType("CORRETIVA");
     setProblemDescription("");
     setOpeningOdometerKm("");
+    setSupplierId("");
+    setCostCenterId("");
+    setChartOfAccountsId("");
     setFormError(null);
   }
 
@@ -63,7 +75,8 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
     try {
       await createWorkOrder.mutateAsync({
         tractor_unit_id: tractorUnitId, type, problem_description: problemDescription,
-        opening_odometer_km: openingOdometerKm || undefined,
+        opening_odometer_km: openingOdometerKm || undefined, supplier_id: supplierId || undefined,
+        cost_center_id: costCenterId || undefined, chart_of_accounts_id: chartOfAccountsId || undefined,
       });
       toast.success("Ordem de serviço criada.");
       reset();
@@ -130,6 +143,58 @@ export function WorkOrderFormDrawer({ open, onOpenChange }: WorkOrderFormDrawerP
               onChange={(event) => setOpeningOdometerKm(event.target.value)}
             />
           </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-order-supplier">Fornecedor executor (opcional)</Label>
+            <Select value={supplierId} onValueChange={setSupplierId}>
+              <SelectTrigger id="work-order-supplier">
+                <SelectValue placeholder="Mão de obra interna, sem fornecedor" />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliersQuery.data?.data.map((supplier) => (
+                  <SelectItem key={supplier.id} value={supplier.id}>
+                    {supplier.razao_social}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-order-cost-center">Centro de custo (opcional)</Label>
+            <Select value={costCenterId} onValueChange={setCostCenterId}>
+              <SelectTrigger id="work-order-cost-center">
+                <SelectValue placeholder="Sem centro de custo" />
+              </SelectTrigger>
+              <SelectContent>
+                {costCentersQuery.data?.data.map((costCenter) => (
+                  <SelectItem key={costCenter.id} value={costCenter.id}>
+                    {costCenter.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-order-chart">Plano de contas (opcional)</Label>
+            <Select value={chartOfAccountsId} onValueChange={setChartOfAccountsId}>
+              <SelectTrigger id="work-order-chart">
+                <SelectValue placeholder="Sem conta contábil" />
+              </SelectTrigger>
+              <SelectContent>
+                {chartQuery.data?.data.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.account_code} — {account.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Fornecedor + Centro de custo + Plano de contas, todos preenchidos, habilitam a Conta a Pagar
+            automática quando a OS for fechada.
+          </p>
 
           {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
 

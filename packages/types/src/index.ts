@@ -395,6 +395,212 @@ export interface UpdateCostCenterRequest {
   status?: CostCenterStatus;
 }
 
+/* ── Financeiro (Contas a Pagar/Receber, Faturas, Plano de Contas, Contas Bancárias, Estornos) ──
+ * Sprint 15, Lote Financeiro, Parte 2. Backend congelado desde a Parte 1 — só consumindo o
+ * contrato existente aqui, nenhuma invenção de campo. `FinancialReversal` não expõe quem fez o
+ * estorno (sem `actor`/`usuario_id` no contrato) — gap real registrado, não meio-inventado aqui. */
+
+export type PayableOrigin = "VIAGEM" | "ORDEM_SERVICO" | "ABASTECIMENTO" | "COMPRA" | "AJUSTE_MANUAL";
+export type PayableStatus = "LANCADA" | "AGUARDANDO_APROVACAO" | "APROVADA" | "PAGA" | "CONCILIADA" | "REJEITADA";
+export type ExpenseApprovalDecision = "APROVADO" | "REJEITADO";
+export type ExpenseAllocationCriterion = "KM_RODADO" | "NUMERO_VIAGENS" | "PESO_TRANSPORTADO";
+
+export interface AccountsPayable {
+  id: UUID;
+  supplier_id: UUID;
+  cost_center_id: UUID;
+  origin: PayableOrigin;
+  trip_id?: UUID;
+  maintenance_order_id?: UUID;
+  vehicle_id?: UUID;
+  driver_id?: UUID;
+  value: string;
+  due_date: string;
+  accounting_period: string;
+  chart_of_accounts_id: UUID;
+  status: PayableStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateAccountsPayableRequest {
+  supplier_id: UUID;
+  cost_center_id: UUID;
+  origin: PayableOrigin;
+  trip_id?: UUID;
+  maintenance_order_id?: UUID;
+  vehicle_id?: UUID;
+  driver_id?: UUID;
+  value: string;
+  due_date: string;
+  accounting_period: string;
+  chart_of_accounts_id: UUID;
+}
+
+export interface UpdateAccountsPayableRequest {
+  supplier_id?: UUID;
+  cost_center_id?: UUID;
+  value?: string;
+  due_date?: string;
+  chart_of_accounts_id?: UUID;
+}
+
+export interface ExpenseDecisionRequest {
+  justification?: string;
+}
+
+export interface PayAccountsPayableRequest {
+  bank_account_id: UUID;
+}
+
+export interface ExpenseApproval {
+  id: UUID;
+  decision: ExpenseApprovalDecision;
+  justification?: string;
+  actor_id: UUID;
+  decided_at: ISODateTime;
+}
+
+export interface ExpenseAllocation {
+  id: UUID;
+  cost_center_id?: UUID;
+  trip_id?: UUID;
+  criterion: ExpenseAllocationCriterion;
+  allocated_value: string;
+}
+
+export type InvoiceStatus = "EMITIDA" | "CANCELADA";
+
+export interface Invoice {
+  id: UUID;
+  invoice_number: string;
+  trip_id?: UUID;
+  delivery_id?: UUID;
+  client_id: UUID;
+  total_value: string;
+  issue_date: string;
+  payment_method_id: UUID;
+  status: InvoiceStatus;
+  audit: AuditMetadata;
+}
+
+export interface InvoiceInstallmentRequest {
+  value: string;
+  due_date: string;
+  accounting_period: string;
+}
+
+export interface CreateInvoiceRequest {
+  trip_id?: UUID;
+  delivery_id?: UUID;
+  client_id: UUID;
+  total_value: string;
+  payment_method_id: UUID;
+  installments: InvoiceInstallmentRequest[];
+}
+
+export type ReceivableStatus = "PENDENTE" | "VENCIDA" | "RECEBIDA" | "CONCILIADA";
+
+export interface AccountsReceivable {
+  id: UUID;
+  installment_number: number;
+  value: string;
+  due_date: string;
+  accounting_period: string;
+  received_at?: ISODateTime;
+  status: ReceivableStatus;
+}
+
+export interface CreateAccountsReceivableRequest {
+  value: string;
+  due_date: string;
+  accounting_period: string;
+}
+
+export interface UpdateAccountsReceivableRequest {
+  value?: string;
+  due_date?: string;
+}
+
+export interface ConfirmReceiptRequest {
+  received_value: string;
+}
+
+export type ChartOfAccountsType = "RECEITA" | "DESPESA";
+export type ChartOfAccountsStatus = "ATIVO" | "INATIVO";
+
+export interface ChartOfAccounts {
+  id: UUID;
+  account_code: string;
+  name: string;
+  type: ChartOfAccountsType;
+  parent_id?: UUID;
+  status: ChartOfAccountsStatus;
+  audit: AuditMetadata;
+}
+
+export interface CreateChartOfAccountsRequest {
+  account_code: string;
+  name: string;
+  type: ChartOfAccountsType;
+  parent_id?: UUID;
+}
+
+export interface UpdateChartOfAccountsRequest {
+  name?: string;
+  parent_id?: UUID;
+  status?: ChartOfAccountsStatus;
+}
+
+export type BankAccountType = "CORRENTE" | "POUPANCA";
+export type BankAccountStatus = "ATIVA" | "INATIVA";
+
+export interface BankAccount {
+  id: UUID;
+  bank: string;
+  branch: string;
+  account_number: string;
+  type: BankAccountType;
+  status: BankAccountStatus;
+  audit: AuditMetadata;
+}
+
+export interface BankAccountBalance {
+  bank_account_id: UUID;
+  balance: string;
+  calculated_at: ISODateTime;
+}
+
+export interface CreateBankAccountRequest {
+  bank: string;
+  branch: string;
+  account_number: string;
+  type: BankAccountType;
+}
+
+export interface UpdateBankAccountRequest {
+  bank?: string;
+  branch?: string;
+  status?: BankAccountStatus;
+}
+
+export interface FinancialReversal {
+  id: UUID;
+  invoice_id?: UUID;
+  accounts_payable_id?: UUID;
+  accounts_receivable_id?: UUID;
+  value: string;
+  reason: string;
+  reversed_at: ISODateTime;
+}
+
+export interface CreateFinancialReversalRequest {
+  invoice_id?: UUID;
+  accounts_payable_id?: UUID;
+  accounts_receivable_id?: UUID;
+  value: string;
+  reason: string;
+}
+
 /* ── Frota (Veículo/Implemento/Composição/Hodômetro/Disponibilidade) ──
  * Field lists and enum values copied verbatim from the real
  * `*_schemas.py`/domain `value_objects/*.py` files (Sprint 12, Lote Frota
@@ -1075,6 +1281,8 @@ export interface WorkOrder {
   completed_at?: ISODateTime;
   opening_odometer_km?: string;
   completion_odometer_km?: string;
+  cost_center_id?: UUID;
+  chart_of_accounts_id?: UUID;
   audit: AuditMetadata;
 }
 
@@ -1085,6 +1293,8 @@ export interface CreateWorkOrderRequest {
   composition_id?: UUID;
   supplier_id?: UUID;
   opening_odometer_km?: string;
+  cost_center_id?: UUID;
+  chart_of_accounts_id?: UUID;
 }
 
 export interface ConcludeWorkOrderRequest {

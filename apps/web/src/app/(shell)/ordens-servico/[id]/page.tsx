@@ -12,6 +12,9 @@ import { WorkOrderCommandsPanel } from "@/modules/maintenance/components/work-or
 import { WorkOrderItemsTab } from "@/modules/maintenance/components/work-order-items-tab";
 import { WorkOrderStatusBadge } from "@/modules/maintenance/components/work-order-status-badge";
 import { WorkOrderStatusHistory } from "@/modules/maintenance/components/work-order-status-history";
+import { useSupplierQuery } from "@/modules/maintenance/hooks/use-suppliers";
+import { useCostCenterQuery } from "@/modules/financial/hooks/use-cost-centers";
+import { useChartOfAccountsQuery } from "@/modules/financial/hooks/use-chart-of-accounts";
 import { ErrorState } from "@/shared/components/states/error-state";
 import { LoadingState } from "@/shared/components/states/loading-state";
 import { useBreadcrumbLabel } from "@/shared/components/shell/breadcrumb-label-context";
@@ -29,6 +32,10 @@ export default function WorkOrderDetailPage() {
   const workOrderQuery = useWorkOrderQuery(workOrderId);
   const workOrder = workOrderQuery.data;
   useBreadcrumbLabel(`/ordens-servico/${workOrderId}`, workOrder?.codigo);
+
+  const supplierQuery = useSupplierQuery(workOrder?.supplier_id);
+  const costCenterQuery = useCostCenterQuery(workOrder?.cost_center_id);
+  const chartQuery = useChartOfAccountsQuery(workOrder?.chart_of_accounts_id);
 
   if (workOrderQuery.isLoading) return <LoadingState rows={6} />;
   if (workOrderQuery.error || !workOrder)
@@ -115,6 +122,32 @@ export default function WorkOrderDetailPage() {
                   {workOrder.completion_odometer_km
                     ? `${Number(workOrder.completion_odometer_km).toLocaleString("pt-BR")} km`
                     : "—"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle>Financeiro</CardTitle>
+              <CardDescription>
+                Fornecedor + Centro de custo + Plano de contas, todos preenchidos, habilitam a Conta a Pagar
+                automática no fechamento.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Fornecedor executor</span>
+                <span className="font-medium">{supplierQuery.data?.razao_social ?? "—"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Centro de custo</span>
+                <span className="font-medium">{costCenterQuery.data?.nome ?? "—"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Plano de contas</span>
+                <span className="font-medium">
+                  {chartQuery.data ? `${chartQuery.data.account_code} — ${chartQuery.data.name}` : "—"}
                 </span>
               </div>
             </CardContent>
