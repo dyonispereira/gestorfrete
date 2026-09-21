@@ -136,6 +136,13 @@ reembolso), nunca por inferência.
   sentido literal (não há título a pagar a ninguém), fica fora desta automação por decisão, não por
   limitação. Idempotente: a mesma OS nunca gera duas Contas a Pagar, mesmo se `FECHADA` for
   reprocessada. `AbastecimentoRegistrado` segue sem consumidor (fora de escopo desta Parte).
+  **Decisão de Competência (V1, revisitável)**: a Conta a Pagar automática usa o mês em que a OS foi
+  fechada como `COMPETENCIA` — regra objetiva e auditável (o custo é consolidado exatamente nesse
+  momento), mas é uma decisão de V1, não uma verdade contábil universal. Cenários futuros podem
+  exigir competência diferente da data de fechamento (ex.: serviço prestado num mês, nota fiscal
+  emitida no seguinte) — quando isso for pedido, a Conta a Pagar automática precisa aceitar uma
+  competência explícita vinda da própria OS (ainda não modelada), em vez de sempre inferir do
+  fechamento.
 - **Invariantes**: uma Conta a Pagar `Rejeitada` nunca é reaberta — nova Conta a Pagar é lançada,
   referenciando a anterior; toda Conta a Pagar tem origem explícita (D099). **Reconciliado**:
   `COMPETENCIA` é campo explícito, informado na criação — nunca inferido de `DATA_VENCIMENTO`.
