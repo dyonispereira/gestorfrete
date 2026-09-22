@@ -199,6 +199,8 @@ tags:
     description: Webhooks — entrega idempotente e reprocessável (D111/D138, integration).
   - name: Jobs
     description: Execução de Job — autorizada individualmente, nunca disparo arbitrário (D322, integration).
+  - name: Management Results
+    description: Resultado Gerencial — Viagem/Veículo/Cliente/Motorista, projeção calculada sobre fatos existentes, sem entidade nova (D090/D149, analytics).
 
 paths:
   # ---------------------------------------------------------------------------
@@ -8662,6 +8664,238 @@ paths:
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   # ---------------------------------------------------------------------------
+  # Management Results — 090-management-results.md. Lote 4. Nenhuma entidade nova — projeção sobre
+  # fatos existentes (D090/D149). `data_programada__gte`/`__lte` (período) são aceitos por todo
+  # endpoint abaixo mas omitidos dos parâmetros individuais por brevidade — ver 090-management-
+  # results.md para a semântica exata de cada campo de período por dimensão.
+  # ---------------------------------------------------------------------------
+  /analytics/resultado-gerencial/visao-geral:
+    get:
+      tags: [Management Results]
+      summary: Visão Geral do Resultado Gerencial — totais do tenant
+      parameters:
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Totais agregados do período
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OverviewResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/viagens:
+    get:
+      tags: [Management Results]
+      summary: Dimensão Viagem do Resultado Gerencial
+      parameters:
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: client_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: vehicle_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: driver_id
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/UUID" }
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Coleção paginada de resultados por Viagem
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagination"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/TripResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/veiculos:
+    get:
+      tags: [Management Results]
+      summary: "Dimensão Veículo — ranking por Resultado Total, decrescente"
+      parameters:
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Ranking de Veículos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/VehicleResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/veiculos/{vehicle_id}:
+    get:
+      tags: [Management Results]
+      summary: "Drill-down: Veículo → resultado → viagens → custos → OS/CP de origem"
+      parameters:
+        - name: vehicle_id
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Detalhe do Veículo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehicleResultDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/clientes:
+    get:
+      tags: [Management Results]
+      summary: "Dimensão Cliente — ranking por Receita Realizada, decrescente"
+      parameters:
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Ranking de Clientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClientResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/clientes/{client_id}:
+    get:
+      tags: [Management Results]
+      summary: "Drill-down: Cliente → resultado → Faturas → Viagens → CT-es"
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Detalhe do Cliente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientResultDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/motoristas:
+    get:
+      tags: [Management Results]
+      summary: "Dimensão Motorista — ranking por Resultado, decrescente"
+      parameters:
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Ranking de Motoristas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DriverResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /analytics/resultado-gerencial/motoristas/{driver_id}:
+    get:
+      tags: [Management Results]
+      summary: "Drill-down do Motorista — Viagens executadas + custos explicitamente vinculados"
+      parameters:
+        - name: driver_id
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: data_programada__gte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: data_programada__lte
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Detalhe do Motorista
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverResultDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  # ---------------------------------------------------------------------------
   # AI Models — 071-ai-models.md
   # ---------------------------------------------------------------------------
   /ai/models:
@@ -11015,6 +11249,160 @@ components:
         scheduled_date: { type: string, format: date, nullable: true }
         suggested_value: { type: string, nullable: true, description: "Sugestão de valor (receita prevista da Viagem) — apenas um default editável no wizard, nunca aplicado silenciosamente." }
       required: [trip_id, codigo]
+
+    ResultTotals:
+      type: object
+      description: "Lote 4 — Resultado Gerencial. Compartilhado pelas 4 dimensões (090-management-results.md)."
+      properties:
+        trips: { type: integer }
+        predicted_revenue: { type: string }
+        realized_revenue: { type: string }
+        predicted_cost: { type: string }
+        realized_cost: { type: string }
+        realized_margin: { type: string }
+        predicted_margin: { type: string }
+        realized_margin_pct: { type: string, nullable: true, description: "`null` quando `realized_revenue` é zero." }
+        km: { type: string, nullable: true, description: "`null` — gap registrado, nunca aproximado (docs/domain/012-resultado-gerencial.md)." }
+        revenue_per_km: { type: string, nullable: true }
+        cost_per_km: { type: string, nullable: true }
+        margin_per_km: { type: string, nullable: true }
+      required: [trips, predicted_revenue, realized_revenue, predicted_cost, realized_cost, realized_margin, predicted_margin]
+
+    OverviewResult:
+      type: object
+      properties:
+        totals: { $ref: "#/components/schemas/ResultTotals" }
+        maintenance_cost_realized: { type: string }
+        other_costs_realized:
+          type: string
+          description: "Soma única — nunca a soma agrupada por Veículo + por Motorista (podem compartilhar a mesma Conta a Pagar)."
+      required: [totals, maintenance_cost_realized, other_costs_realized]
+
+    TripResult:
+      type: object
+      properties:
+        trip_id: { $ref: "#/components/schemas/UUID" }
+        codigo: { type: string }
+        scheduled_date: { type: string, format: date, nullable: true }
+        client_id: { $ref: "#/components/schemas/UUID" }
+        client_name: { type: string, nullable: true }
+        driver_id: { $ref: "#/components/schemas/UUID", nullable: true }
+        driver_name: { type: string, nullable: true }
+        vehicle_id: { $ref: "#/components/schemas/UUID", nullable: true }
+        vehicle_plate: { type: string, nullable: true }
+        totals: { $ref: "#/components/schemas/ResultTotals" }
+      required: [trip_id, codigo, client_id, totals]
+
+    VehicleResult:
+      type: object
+      properties:
+        vehicle_id: { $ref: "#/components/schemas/UUID" }
+        plate: { type: string }
+        model: { type: string }
+        trip_cost_realized: { type: string, description: "Só `viagens.custo_realizado` do Veículo." }
+        maintenance_cost_predicted: { type: string }
+        maintenance_cost_realized: { type: string }
+        other_costs_realized: { type: string }
+        operational_result: { type: string, description: "Resultado Operacional de Viagens — sem Manutenção/Outros Custos." }
+        operational_margin_pct: { type: string, nullable: true }
+        totals:
+          allOf:
+            - $ref: "#/components/schemas/ResultTotals"
+          description: "`realized_cost`/`realized_margin` aqui são o Resultado TOTAL do Veículo — inclui Manutenção + Outros Custos."
+      required: [vehicle_id, plate, model, trip_cost_realized, maintenance_cost_predicted, maintenance_cost_realized, other_costs_realized, operational_result, totals]
+
+    VehicleCostOrigin:
+      type: object
+      description: "Item de drill-down — a Conta a Pagar exata (e a Ordem de Serviço, quando `origin=ORDEM_SERVICO`) por trás de um real de Manutenção/Outros Custos."
+      properties:
+        accounts_payable_id: { $ref: "#/components/schemas/UUID" }
+        origin: { type: string, enum: [ORDEM_SERVICO, ABASTECIMENTO, COMPRA, AJUSTE_MANUAL] }
+        maintenance_order_id: { $ref: "#/components/schemas/UUID", nullable: true }
+        value: { type: string }
+        accounting_period: { type: string, format: date }
+        status: { type: string, enum: [LANCADA, AGUARDANDO_APROVACAO, APROVADA, PAGA, CONCILIADA] }
+      required: [accounts_payable_id, origin, value, accounting_period, status]
+
+    VehicleResultDetail:
+      type: object
+      properties:
+        result: { $ref: "#/components/schemas/VehicleResult" }
+        trips:
+          type: array
+          items: { $ref: "#/components/schemas/TripResult" }
+        cost_origins:
+          type: array
+          items: { $ref: "#/components/schemas/VehicleCostOrigin" }
+      required: [result, trips, cost_origins]
+
+    ClientResult:
+      type: object
+      properties:
+        client_id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        trade_name: { type: string, nullable: true }
+        totals:
+          allOf:
+            - $ref: "#/components/schemas/ResultTotals"
+          description: "`realized_cost` é só o custo operacional de Viagem do Cliente — nunca inclui Manutenção/frota (gap registrado)."
+      required: [client_id, name, totals]
+
+    ClientInvoiceSummary:
+      type: object
+      properties:
+        invoice_id: { $ref: "#/components/schemas/UUID" }
+        invoice_number: { type: string }
+        issue_date: { type: string, format: date }
+        status: { type: string, enum: [EMITIDA, CANCELADA] }
+        total_value: { type: string }
+        trip_count: { type: integer }
+      required: [invoice_id, invoice_number, issue_date, status, total_value, trip_count]
+
+    ClientResultDetail:
+      type: object
+      properties:
+        result: { $ref: "#/components/schemas/ClientResult" }
+        trips:
+          type: array
+          items: { $ref: "#/components/schemas/TripResult" }
+        invoices:
+          type: array
+          items: { $ref: "#/components/schemas/ClientInvoiceSummary" }
+      required: [result, trips, invoices]
+
+    DriverResult:
+      type: object
+      properties:
+        driver_id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        trip_cost_realized: { type: string, description: "Custo das Viagens que o Motorista executou." }
+        linked_cost_realized:
+          type: string
+          description: "Contas a Pagar explicitamente vinculadas ao Motorista (`origem != VIAGEM`) — nunca herdado do Veículo."
+        totals: { $ref: "#/components/schemas/ResultTotals" }
+      required: [driver_id, name, trip_cost_realized, linked_cost_realized, totals]
+
+    DriverLinkedCost:
+      type: object
+      properties:
+        accounts_payable_id: { $ref: "#/components/schemas/UUID" }
+        origin: { type: string, enum: [ABASTECIMENTO, COMPRA, AJUSTE_MANUAL] }
+        value: { type: string }
+        accounting_period: { type: string, format: date }
+        status: { type: string, enum: [LANCADA, AGUARDANDO_APROVACAO, APROVADA, PAGA, CONCILIADA] }
+      required: [accounts_payable_id, origin, value, accounting_period, status]
+
+    DriverResultDetail:
+      type: object
+      properties:
+        result: { $ref: "#/components/schemas/DriverResult" }
+        trips:
+          type: array
+          items: { $ref: "#/components/schemas/TripResult" }
+        linked_costs:
+          type: array
+          items: { $ref: "#/components/schemas/DriverLinkedCost" }
+      required: [result, trips, linked_costs]
 
     AccountsReceivable:
       type: object

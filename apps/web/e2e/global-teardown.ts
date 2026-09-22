@@ -16,6 +16,7 @@ const FIXTURE_FILES = [
   "work-orders-teardown.sql",
   "availability-teardown.sql",
   "financeiro-teardown.sql",
+  "resultado-gerencial-teardown.sql",
 ];
 
 export default function globalTeardown(): void {

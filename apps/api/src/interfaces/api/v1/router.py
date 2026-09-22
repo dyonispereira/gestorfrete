@@ -4,6 +4,7 @@ from interfaces.api.v1.search_router import router as search_router
 from modules.analytics.interfaces.api.analytical_snapshot_router import router as analytical_snapshot_router
 from modules.analytics.interfaces.api.analytics_cube_router import router as analytics_cube_router
 from modules.analytics.interfaces.api.consolidated_indicator_router import router as consolidated_indicator_router
+from modules.analytics.interfaces.api.management_result_router import router as management_result_router
 from modules.analytics.interfaces.api.metric_router import router as metric_router
 from modules.ai.interfaces.api.ai_anomaly_router import router as ai_anomaly_router
 from modules.ai.interfaces.api.ai_classification_router import router as ai_classification_router
@@ -201,6 +202,11 @@ api_router_v1.include_router(saved_filter_router)
 api_router_v1.include_router(saved_report_router)
 api_router_v1.include_router(export_router)
 api_router_v1.include_router(scheduled_update_router)
+
+# Lote 4 — Resultado Gerencial. Mesma direção D090/D149 acima: `analytics` lê `freight`/
+# `financial`/`maintenance`/`fleet`/`drivers`/`crm` diretamente, nunca escreve de volta. Prefixo
+# próprio (`/analytics/resultado-gerencial/*`), sem colisão com os routers de BI acima.
+api_router_v1.include_router(management_result_router)
 
 # Sprint 11, Lote 12 — IA (D423-D426). `ai` nunca escreve em módulo operacional (D161/D426, novo
 # contrato do import-linter); `AIInferenceEngine` nunca alcançável por HTTP. Prefixos próprios

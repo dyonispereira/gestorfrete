@@ -1401,3 +1401,111 @@ export interface CostApproval {
   actor_id: UUID;
   occurred_at: ISODateTime;
 }
+
+// Lote 4 — Resultado Gerencial (090-management-results.md). Nenhuma entidade nova, só projeção.
+
+export interface ResultTotals {
+  trips: number;
+  predicted_revenue: string;
+  realized_revenue: string;
+  predicted_cost: string;
+  realized_cost: string;
+  realized_margin: string;
+  predicted_margin: string;
+  realized_margin_pct: string | null;
+  km: string | null;
+  revenue_per_km: string | null;
+  cost_per_km: string | null;
+  margin_per_km: string | null;
+}
+
+export interface OverviewResult {
+  totals: ResultTotals;
+  maintenance_cost_realized: string;
+  other_costs_realized: string;
+}
+
+export interface TripResult {
+  trip_id: UUID;
+  codigo: string;
+  scheduled_date: string | null;
+  client_id: UUID;
+  client_name: string | null;
+  driver_id: UUID | null;
+  driver_name: string | null;
+  vehicle_id: UUID | null;
+  vehicle_plate: string | null;
+  totals: ResultTotals;
+}
+
+export interface VehicleResult {
+  vehicle_id: UUID;
+  plate: string;
+  model: string;
+  trip_cost_realized: string;
+  maintenance_cost_predicted: string;
+  maintenance_cost_realized: string;
+  other_costs_realized: string;
+  operational_result: string;
+  operational_margin_pct: string | null;
+  totals: ResultTotals;
+}
+
+export interface VehicleCostOrigin {
+  accounts_payable_id: UUID;
+  origin: string;
+  maintenance_order_id: UUID | null;
+  value: string;
+  accounting_period: string;
+  status: string;
+}
+
+export interface VehicleResultDetail {
+  result: VehicleResult;
+  trips: TripResult[];
+  cost_origins: VehicleCostOrigin[];
+}
+
+export interface ClientResult {
+  client_id: UUID;
+  name: string;
+  trade_name?: string | null;
+  totals: ResultTotals;
+}
+
+export interface ClientInvoiceSummary {
+  invoice_id: UUID;
+  invoice_number: string;
+  issue_date: string;
+  status: string;
+  total_value: string;
+  trip_count: number;
+}
+
+export interface ClientResultDetail {
+  result: ClientResult;
+  trips: TripResult[];
+  invoices: ClientInvoiceSummary[];
+}
+
+export interface DriverResult {
+  driver_id: UUID;
+  name: string;
+  trip_cost_realized: string;
+  linked_cost_realized: string;
+  totals: ResultTotals;
+}
+
+export interface DriverLinkedCost {
+  accounts_payable_id: UUID;
+  origin: string;
+  value: string;
+  accounting_period: string;
+  status: string;
+}
+
+export interface DriverResultDetail {
+  result: DriverResult;
+  trips: TripResult[];
+  linked_costs: DriverLinkedCost[];
+}

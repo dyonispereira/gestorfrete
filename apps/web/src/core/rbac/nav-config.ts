@@ -18,6 +18,7 @@ import {
   Receipt,
   Settings,
   ShieldCheck,
+  TrendingUp,
   Truck,
   Undo2,
   UserCog,
@@ -326,6 +327,21 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "insights",
     label: "BI & IA",
     items: [
+      {
+        id: "resultado-gerencial",
+        label: "Resultado Gerencial",
+        href: "/resultados",
+        icon: TrendingUp,
+        requiredPermissions: [
+          "analytics.executive_dashboard.view",
+          "analytics.freight_report.view",
+          "analytics.maintenance_report.view",
+          "analytics.financial_report.view",
+          "analytics.driver_report.view",
+        ],
+        description: "Resultado por Viagem, Veículo, Cliente e Motorista — Operação → Fiscal → Financeiro → Resultado.",
+        implemented: true,
+      },
       {
         id: "dashboards",
         label: "Dashboards",

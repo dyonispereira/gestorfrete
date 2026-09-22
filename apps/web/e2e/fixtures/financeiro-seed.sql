@@ -72,7 +72,7 @@ VALUES
 
 INSERT INTO papel_permissao (papel_id, permissao_id, criado_em)
 SELECT 'f14a0000-0000-0000-0000-0000000000a1', id, now() FROM permissoes
-WHERE modulo IN ('freight', 'crm', 'drivers', 'fleet', 'maintenance', 'documents', 'financial')
+WHERE modulo IN ('freight', 'crm', 'drivers', 'fleet', 'maintenance', 'documents', 'financial', 'analytics')
    OR codigo LIKE 'storage.%'
    OR codigo LIKE 'financial.trip_%.view'
    OR codigo IN ('identity_access.role.view', 'identity_access.user.view');
