@@ -226,7 +226,18 @@ fluxo alternativo e independente.
   referenciando a anterior; toda Conta a Pagar tem origem explícita (D099). **Reconciliado**:
   `COMPETENCIA` é campo explícito, informado na criação — nunca inferido de `DATA_VENCIMENTO`.
   `MOTORISTA_ID` nunca é herdado automaticamente da Viagem associada, mesmo quando `VIAGEM_ID` está
-  preenchido — só setado quando o lançamento é atribuível ao motorista por si só.
+  preenchido — só setado quando o lançamento é atribuível ao motorista por si só. **Reconciliado
+  (V1 Operational Hardening, Parte 1)**: formaliza quais estados compõem `Viagem.custo_realizado`
+  — regime de competência (accrual), não caixa. `LANCADA`/`AGUARDANDO_APROVACAO`/`APROVADA`/`PAGA`/
+  `CONCILIADA` contam igualmente, desde o lançamento — coerente com "Custo Realizado: acumulado
+  conforme a viagem executa" (`005-FINANCEIRO.md`) e com o precedente já formalizado para
+  Abastecimento (`006-ABASTECIMENTO.md`: "`SUSPEITO → REJEITADO` ... não entra no Custo
+  Realizado"). `REJEITADA` é a única exclusão: rejeitar uma Conta a Pagar cujo `allocation_target_
+  trip_id` não é nulo (origem `VIAGEM`, ou `ORDEM_SERVICO` com Viagem associada) remove seu Rateio
+  e recalcula `custo_realizado` da Viagem — mesmo mecanismo já usado por `DeleteAccountsPayable
+  Handler` (D390/D393), agora também em `RejectAccountsPayableHandler` (gap fechado — antes, uma
+  Conta a Pagar rejeitada continuava contando). Estorno (D266) nunca altera `status`/`valor` da
+  Conta a Pagar original — por construção, nunca afeta `custo_realizado`; nada a corrigir ali.
 - **Regras de negócio associadas**: D001, D007, D099 (origem obrigatória), D100 (imutável após
   `Conciliada`).
 - **Estados**: `LANCADA` / `AGUARDANDO_APROVACAO` / `APROVADA` / `PAGA` / `CONCILIADA` /

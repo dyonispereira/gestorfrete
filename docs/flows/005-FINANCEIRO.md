@@ -114,6 +114,11 @@ A partir desses quatro valores:
   atinge `ENCERRADA`** (D019): antes disso, Custo Realizado e Receita Realizada ainda podem mudar.
 - **Desvio Financeiro** = Margem Realizada − Margem Prevista (absoluto e percentual).
 
+**Reconciliado (V1 Operational Hardening, Parte 1)**: Custo Realizado é regime de competência
+(accrual), não caixa — uma Conta a Pagar conta desde o lançamento, em qualquer status exceto
+`REJEITADA` (ver `docs/domain/006-financeiro.md`, seção Conta a Pagar, para o mecanismo exato de
+recálculo ao rejeitar).
+
 Nenhum desses quatro valores é sobrescrito — cada atualização de Custo Realizado (ex: novo
 abastecimento registrado) insere um novo valor acumulado, preservando o valor anterior no histórico
 (mesmo princípio de D018 aplicado a valores monetários, não apenas a status).

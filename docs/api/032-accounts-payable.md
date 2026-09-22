@@ -113,7 +113,12 @@ approvals.md`).
 ### `commands/approve` / `commands/reject`
 
 Cria um registro em `ExpenseApproval` (`aprovacoes_despesa`) e transiciona a Conta a Pagar.
-`justification` obrigatória em `reject` (D010).
+`justification` obrigatória em `reject` (D010). **Reconciliado (V1 Operational Hardening, Parte
+1)**: `reject` remove o Rateio (`rateios_despesa`) desta Conta a Pagar e recalcula
+`viagens.custo_realizado` da Viagem afetada quando `origin=VIAGEM` (ou `ORDEM_SERVICO` com Viagem
+associada) — mesmo mecanismo de `DELETE /contas-pagar/{id}` (D390/D393). `approve` nunca muda
+`custo_realizado` — o custo já contava desde o lançamento (regime de competência,
+`006-financeiro.md`).
 
 **Segurança**: `financial.payable.approve` / `.reject`. **Idempotency-Key**: obrigatório.
 

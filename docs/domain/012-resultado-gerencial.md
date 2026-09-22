@@ -105,11 +105,12 @@ nunca dois buckets da mesma dimensão somam a mesma linha. Provado com Decimal e
    (é lançamento único, sem orçamento prévio) — só Viagem (`custo_previsto`) e Ordem de Serviço
    (`custo_previsto`, calculado de `itens_ordem_servico`) têm um previsto de verdade. "Custo
    Previsto" do Veículo soma os dois; "Outros Custos" só existe do lado realizado.
-3. **Conta a Pagar `REJEITADA` que já tinha sido lançada continua contando em
-   `viagens.custo_realizado`** (D390, comportamento anterior a esta Parte — `create_accounts_
-   payable.py` recalcula o realizado na criação, e rejeitar não dispara um novo recálculo). Não
-   alterado aqui, fora de escopo. Os buckets novos desta Parte (Manutenção, Outros Custos, custo
-   vinculado ao Motorista) excluem `REJEITADA` explicitamente — divergência deliberada, documentada
-   para não parecer inconsistência não-intencional.
+3. ~~Conta a Pagar `REJEITADA` que já tinha sido lançada continua contando em
+   `viagens.custo_realizado`~~ — **fechado no V1 Operational Hardening, Parte 1**:
+   `RejectAccountsPayableHandler` agora recalcula `custo_realizado` da Viagem afetada, mesmo
+   mecanismo já usado por `DeleteAccountsPayableHandler` (D390/D393). Ver
+   `docs/domain/006-financeiro.md`, seção Conta a Pagar, para a regra formal (regime de
+   competência — qualquer status conta, exceto `REJEITADA`) e `test_accounts_payable_cost_
+   integrity.py` para a prova matemática.
 4. **Custo do Cliente não inclui frota/manutenção** (ver "Dimensão Cliente" acima) — exigiria uma
    regra de rateio inexistente.
