@@ -99,6 +99,11 @@ class VehicleResultDTO:
     other_costs_realized: Decimal
     operational_result: Decimal
     operational_margin_pct: Decimal | None
+    # V1 Operational Hardening, Parte 3 — "Custo operacional/km" (só Viagens) vs. `totals.cost_per_km`
+    # ("Custo total/km", inclui Manutenção+Outros Custos) — mesma distinção Operacional×Total de cima,
+    # levada ao KM. `None` sob a mesma regra de `totals.km` (nunca uma fração de KM indisponível).
+    operational_cost_per_km: Decimal | None
+    operational_result_per_km: Decimal | None
     totals: ResultTotals
 
 

@@ -8,7 +8,7 @@ import { Badge, Card, CardContent, CardHeader, CardTitle, Table, TableBody, Tabl
 import { useVehicleResultDetailQuery } from "@/modules/analytics/hooks/use-management-results";
 import { ResultSummaryCards } from "@/modules/analytics/components/result-summary-cards";
 import { TripResultsTable } from "@/modules/analytics/components/trip-results-table";
-import { formatMoney } from "@/modules/analytics/lib/format";
+import { formatMoney, formatMoneyPerKm } from "@/modules/analytics/lib/format";
 import { ErrorState } from "@/shared/components/states/error-state";
 import { LoadingState } from "@/shared/components/states/loading-state";
 import { useBreadcrumbLabel } from "@/shared/components/shell/breadcrumb-label-context";
@@ -64,6 +64,14 @@ export default function VehicleResultDetailPage() {
             <span className={`font-semibold ${Number(result.totals.realized_margin) < 0 ? "text-destructive" : "text-foreground"}`}>
               {formatMoney(result.totals.realized_margin)}
             </span>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
+            <span className="text-muted-foreground">Resultado Operacional/km</span>
+            <span className="font-medium">{formatMoneyPerKm(result.operational_result_per_km)}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Resultado Total/km</span>
+            <span className="font-medium">{formatMoneyPerKm(result.totals.margin_per_km)}</span>
           </div>
         </CardContent>
       </Card>

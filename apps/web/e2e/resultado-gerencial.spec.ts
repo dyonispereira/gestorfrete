@@ -145,7 +145,8 @@ async function allocateAndReleaseTrip(page: Page, driverName: string, plate: str
 }
 
 async function createFullyInvoiceableTrip(
-  page: Page, request: APIRequestContext, clientName: string, driverName: string, plate: string
+  page: Page, request: APIRequestContext, clientName: string, driverName: string, plate: string,
+  departureOdometerKm?: string,
 ): Promise<{ tripId: string; codigo: string }> {
   await page.goto("/viagens");
   await page.getByRole("button", { name: "Nova viagem" }).click();
@@ -161,6 +162,11 @@ async function createFullyInvoiceableTrip(
 
   await allocateAndReleaseTrip(page, driverName, plate);
 
+  // V1 Operational Hardening, Parte 2 — hodômetro de saída (opcional), campo inline ao lado do
+  // botão "Despachar" (nunca atrás de um diálogo extra — single click continua válido sem ele).
+  if (departureOdometerKm) {
+    await page.fill("#trip-departure-odometer-km", departureOdometerKm);
+  }
   await Promise.all([
     page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/commands/dispatch")),
     page.getByRole("button", { name: "Despachar" }).click(),
@@ -312,7 +318,7 @@ test.describe("Sprint — Resultado Gerencial (Lote 4)", () => {
     // Veículo nas duas exigiria encerrar a primeira Viagem antes, fora do escopo deste teste. Isso
     // ainda prova tudo que o usuário pediu: Fatura agrupada de um Cliente com Viagens de
     // Veículos/Motoristas diferentes, e cada dimensão soma exatamente as Viagens que lhe cabem.
-    const tripA = await createFullyInvoiceableTrip(page, request, clientAName, driver1Name, plateV1);
+    const tripA = await createFullyInvoiceableTrip(page, request, clientAName, driver1Name, plateV1, "100000.00");
     const tripB = await createFullyInvoiceableTrip(page, request, clientAName, driver2Name, plateV2);
 
     // Fatura agrupada: tripA (600) + tripB (400) = 1000. Baixa parcial (300) + baixa final (700) —
@@ -380,6 +386,13 @@ test.describe("Sprint — Resultado Gerencial (Lote 4)", () => {
     await expect(tripARow.getByText("R$ 550,00")).toBeVisible(); // margem = 600 - 50
     await expect(tripBRow.getByText("R$ 400,00").first()).toBeVisible();
     await expect(tripBRow.getByText("R$ 0,00")).toBeVisible(); // sem CP própria — margem = receita cheia
+
+    // V1 Operational Hardening, Parte 2/3 — tripA teve o hodômetro de SAÍDA capturado no despacho,
+    // mas `commands/finish` é inalcançável pela UI real hoje (sem endpoint de Coleta/Romaneio para
+    // avançar até EM_ENTREGA — gap registrado, fora do escopo desta Parte). Com só uma das duas
+    // leituras de fronteira, o KM tem que continuar "Indisponível" — nunca uma estimativa a partir
+    // de uma leitura só.
+    await expect(tripARow.getByText("Indisponível").first()).toBeVisible();
 
     // --- Dimensão Veículo: V1 (o de tripA) carrega Manutenção (1200) além do custo da própria
     // Viagem (50) — isso NUNCA aparece na Viagem nem no Motorista. V2 (o de tripB) fica intocado.

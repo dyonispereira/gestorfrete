@@ -92,6 +92,8 @@ class VehicleResultResponse(BaseModel):
     other_costs_realized: Decimal
     operational_result: Decimal
     operational_margin_pct: Decimal | None
+    operational_cost_per_km: Decimal | None
+    operational_result_per_km: Decimal | None
     totals: ResultTotalsResponse
 
     @staticmethod
@@ -102,7 +104,10 @@ class VehicleResultResponse(BaseModel):
             maintenance_cost_predicted=dto.maintenance_cost_predicted,
             maintenance_cost_realized=dto.maintenance_cost_realized,
             other_costs_realized=dto.other_costs_realized, operational_result=dto.operational_result,
-            operational_margin_pct=dto.operational_margin_pct, totals=ResultTotalsResponse.from_dto(dto.totals),
+            operational_margin_pct=dto.operational_margin_pct,
+            operational_cost_per_km=dto.operational_cost_per_km,
+            operational_result_per_km=dto.operational_result_per_km,
+            totals=ResultTotalsResponse.from_dto(dto.totals),
         )
 
 

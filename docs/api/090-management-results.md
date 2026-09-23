@@ -74,6 +74,8 @@ VehicleResult:
       type: string
       description: "Resultado Operacional de Viagens = Receita Realizada − `trip_cost_realized`, sem Manutenção/Outros Custos."
     operational_margin_pct: { type: string, nullable: true }
+    operational_cost_per_km: { type: string, nullable: true, description: "V1 Operational Hardening, Parte 3 — só Viagens." }
+    operational_result_per_km: { type: string, nullable: true }
     totals:
       allOf:
         - $ref: '#/components/schemas/ResultTotals'

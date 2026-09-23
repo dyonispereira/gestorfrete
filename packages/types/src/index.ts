@@ -930,6 +930,14 @@ export interface UpdateTripRequest {
   janela_programada?: ISODateTime;
 }
 
+export interface DispatchTripRequest {
+  departure_odometer_km?: string;
+}
+
+export interface FinishTripRequest {
+  arrival_odometer_km?: string;
+}
+
 export interface InterromperTripRequest {
   notes: string;
 }
@@ -1448,6 +1456,8 @@ export interface VehicleResult {
   other_costs_realized: string;
   operational_result: string;
   operational_margin_pct: string | null;
+  operational_cost_per_km: string | null;
+  operational_result_per_km: string | null;
   totals: ResultTotals;
 }
 

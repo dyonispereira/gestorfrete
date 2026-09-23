@@ -48,6 +48,13 @@ def build_vehicle_result(
     totals = build_totals(
         trip_agg, extra_realized_cost=maintenance_realized + other_realized, extra_predicted_cost=maintenance_predicted
     )
+    km = totals.km
+    operational_cost_per_km = (
+        (trip_agg.realized_cost / km).quantize(_CENTS, rounding=ROUND_HALF_UP) if km is not None else None
+    )
+    operational_result_per_km = (
+        (operational_result / km).quantize(_CENTS, rounding=ROUND_HALF_UP) if km is not None else None
+    )
     return VehicleResultDTO(
         vehicle_id=vehicle_id, plate=plate, model=model,
         trip_cost_realized=trip_agg.realized_cost.quantize(_CENTS, rounding=ROUND_HALF_UP),
@@ -56,6 +63,8 @@ def build_vehicle_result(
         other_costs_realized=other_realized.quantize(_CENTS, rounding=ROUND_HALF_UP),
         operational_result=operational_result.quantize(_CENTS, rounding=ROUND_HALF_UP),
         operational_margin_pct=operational_margin_pct,
+        operational_cost_per_km=operational_cost_per_km,
+        operational_result_per_km=operational_result_per_km,
         totals=totals,
     )
 

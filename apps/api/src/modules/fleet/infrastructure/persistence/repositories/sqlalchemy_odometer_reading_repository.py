@@ -42,6 +42,21 @@ class SqlAlchemyOdometerReadingRepository(OdometerReadingRepository):
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         return _to_entity(model) if model is not None else None
 
+    async def get_for_trip(self, viagem_id: uuid.UUID, origem: OdometerOrigin) -> OdometerReading | None:
+        tenant_id = get_current_tenant_id()
+        stmt = (
+            select(OdometerReadingModel)
+            .where(
+                OdometerReadingModel.tenant_id == tenant_id,
+                OdometerReadingModel.viagem_id == viagem_id,
+                OdometerReadingModel.origem == origem.value,
+            )
+            .order_by(OdometerReadingModel.data_hora.desc(), OdometerReadingModel.id.desc())
+            .limit(1)
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(model) if model is not None else None
+
     async def list_for_vehicle_cursor(
         self,
         *,

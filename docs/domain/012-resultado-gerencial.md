@@ -50,6 +50,10 @@ Pedido central do usuário: um caminhão pode parecer ótimo nas Viagens e consu
   sido explicitamente tagueado ao Veículo no cadastro (não é inferido de `viagem_id`).
 - **Custo Total** = Custo Realizado (Viagens) + Manutenção Realizada + Outros Custos Realizados.
 - **Resultado Total do Veículo** = Receita Realizada − Custo Total.
+- **Custo Operacional/km** (V1 Operational Hardening, Parte 3) = Custo Realizado (só Viagens) / KM;
+  **Custo Total/km** = Custo Total / KM — mesma distinção Operacional×Total levada ao KM. Idem para
+  **Resultado Operacional/km**/**Resultado Total/km**. `null` sob a mesma regra de `KM` (grupo
+  precisa ter KM conhecido em todas as Viagens).
 
 ## Dimensão Cliente — escopo deliberado
 
@@ -94,13 +98,17 @@ nunca dois buckets da mesma dimensão somam a mesma linha. Provado com Decimal e
 
 ## Gaps registrados — não aproximados
 
-1. **KM rodado por Viagem não é derivável hoje.** `viagens.km_rodado` existe na coluna mas nunca é
-   preenchido por nenhum fluxo (nem despacho, nem finalização). `leituras_hodometro` tem um
-   `viagem_id` opcional, mas é lançamento manual, sem convenção de par início/fim — não há como
-   calcular `km` de uma Viagem com segurança a partir dos contratos atuais. Consequência: `KM`,
-   `Receita/km`, `Custo/km`, `Margem/km` retornam `null` (nunca `0` ou uma aproximação) sempre que a
-   base não tiver `km_rodado`, em qualquer dimensão. Fechar este gap exige decidir uma convenção real
-   de captura de KM por Viagem — fora do escopo desta Parte.
+1. ~~KM rodado por Viagem não é derivável hoje~~ — **fechado no V1 Operational Hardening, Parte
+   2/3**: `hodometro_saida_km`/`hodometro_chegada_km` (opcionais) em `commands/dispatch`/
+   `commands/finish` gravam as leituras de fronteira `DESPACHO_VIAGEM`/`ENCERRAMENTO_VIAGEM` em
+   `leituras_hodometro` (`fleet`, D034) via `TripOdometerRecorder`; `Trip.km_rodado` é a diferença
+   entre as duas, nunca uma segunda fonte da verdade (ver `docs/domain/003-frota.md`). Continua
+   `null` quando a Viagem não tiver as duas leituras — **e agora também quando um GRUPO agregado
+   (Veículo/Cliente/Motorista/Visão Geral) tiver ALGUMAS Viagens com KM conhecido e outras sem**:
+   `SUM()` em SQL ignora `NULL`, então uma soma parcial precisou ser explicitamente detectada e
+   tratada como indisponível (nunca mostrada como se fosse o total completo) — ver
+   `ManagementResultReadRepository`/`test_management_result_flow.py`. `Receita/Custo/Margem por km`
+   seguem `null` sob a mesma regra, em qualquer dimensão.
 2. **Manutenção não tem "Outros Custos" previsto.** `contas_pagar` não distingue previsto/realizado
    (é lançamento único, sem orçamento prévio) — só Viagem (`custo_previsto`) e Ordem de Serviço
    (`custo_previsto`, calculado de `itens_ordem_servico`) têm um previsto de verdade. "Custo

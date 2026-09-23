@@ -70,9 +70,10 @@ condicional). D238 — toda resposta de comando bem-sucedido devolve o `Trip` in
 | Novo estado | `EM_DESLOCAMENTO` |
 | Permissão RBAC | `freight.trip.dispatch` |
 | Pré-condições | Checklist aprovado (já implícito em ter alcançado `LIBERADA`) |
+| Corpo (opcional) | `{"departure_odometer_km": "123456.00"}` — **Reconciliado (V1 Operational Hardening, Parte 2)**: grava a leitura de fronteira de despacho em `leituras_hodometro` (`fleet`, D034) via `TripOdometerRecorder`; omitido, a Viagem simplesmente fica sem `km_rodado` depois — nunca estimado |
 | Evento publicado | `ViagemDespachada` |
-| Consumidores | `documents` (emissão de CT-e), `tracking`, `mobile`, `notification_center` |
-| Erros possíveis | `401`, `403`, `404`, `409` — `FREIGHT_TRIP_INVALID_TRANSITION` |
+| Consumidores | `documents` (emissão de CT-e), `tracking`, `mobile`, `notification_center`, `fleet` (leitura de hodômetro) |
+| Erros possíveis | `401`, `403`, `404`, `409` — `FREIGHT_TRIP_INVALID_TRANSITION`; `422` — `FLEET_ODOMETER_READING_LOWER_THAN_LAST` (hodômetro informado menor que a última leitura do Veículo — a transição da Viagem já havia comitado, mesmo trade-off já aceito para CT-e/Disponibilidade neste comando) |
 
 ### `POST /viagens/{id}/commands/start`
 
@@ -83,6 +84,7 @@ condicional). D238 — toda resposta de comando bem-sucedido devolve o `Trip` in
 | Novo estado | `EM_DESLOCAMENTO` |
 | Permissão RBAC | `freight.trip.start` (Escopo Próprio usuário — só o Motorista da alocação vigente) |
 | Pré-condições | Ator é o `driver_id` vigente |
+| Corpo (opcional) | `{"departure_odometer_km": "123456.00"}` — mesmo campo/efeito de `dispatch` (V1 Operational Hardening, Parte 2); o app do Motorista, fisicamente no veículo, é o ponto mais natural para informá-lo |
 | Evento publicado | `ViagemDespachada` *(mesmo evento de `dispatch` — mesma transição, origem diferente registrada em `viagem_status_history.origem = 'app_motorista'`)* |
 | Consumidores | Idem `dispatch` |
 | Erros possíveis | `401`, `403` (ator não é o Motorista alocado), `404`, `409` |
@@ -96,9 +98,10 @@ condicional). D238 — toda resposta de comando bem-sucedido devolve o `Trip` in
 | Novo estado | `FINALIZADA` |
 | Permissão RBAC | `freight.trip.finish` |
 | Pré-condições | Todas as Entregas em estado terminal; todos os Canhotos correspondentes registrados |
+| Corpo (opcional) | `{"arrival_odometer_km": "123706.50"}` — **Reconciliado (V1 Operational Hardening, Parte 2)**: grava a leitura de fronteira de encerramento; quando a Viagem também tem a leitura de despacho, `Trip.km_rodado` é calculado e gravado (`leitura_encerramento − leitura_despacho`) — nunca estimado quando faltar uma das duas |
 | Evento publicado | `ViagemConcluida` |
-| Consumidores | `financial`, `analytics`, `audit` |
-| Erros possíveis | `401`, `403`, `404`, `409` (estado errado), `422` — `FREIGHT_TRIP_DELIVERIES_PENDING` (pré-condição de Entregas/Canhotos não satisfeita — erro de regra de negócio, não de máquina de estados, por isso `422` e não `409`, D235) |
+| Consumidores | `financial`, `analytics`, `audit`, `fleet` (leitura de hodômetro) |
+| Erros possíveis | `401`, `403`, `404`, `409` (estado errado), `422` — `FREIGHT_TRIP_DELIVERIES_PENDING` (pré-condição de Entregas/Canhotos não satisfeita — erro de regra de negócio, não de máquina de estados, por isso `422` e não `409`, D235); `422` — `FLEET_ODOMETER_READING_LOWER_THAN_LAST` (hodômetro de chegada menor que a última leitura do Veículo — a transição da Viagem já havia comitado, `km_rodado` fica indisponível, nunca negativo) |
 
 **`Idempotency-Key` obrigatória** (seção 15 do pedido).
 

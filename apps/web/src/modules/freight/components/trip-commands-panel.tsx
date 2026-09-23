@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { Button, Label, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea, toast } from "@gestorfrete/ui";
+import { Button, Input, Label, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea, toast } from "@gestorfrete/ui";
 import type { Trip, TripOperationalStatus } from "@gestorfrete/types";
 
 import { usePermissions } from "@/core/rbac/permissions-provider";
@@ -38,6 +38,12 @@ type DialogCommandKey = "interromper" | "cancelar" | "close-administrative";
  * ficam clicáveis quando o estado correspondente existir (o que, na prática, ainda não acontece
  * neste ambiente). O componente é construído para a máquina de estados completa mesmo assim, para
  * não precisar ser reescrito quando esses módulos existirem.
+ *
+ * V1 Operational Hardening, Parte 2 — Despachar/Iniciar ganham um campo opcional de hodômetro de
+ * saída ao lado do botão, Finalizar um de hodômetro de chegada — inline, nunca atrás de um diálogo
+ * extra: continua sendo um único clique para quem não usa hodômetro (D-consistente com todo botão
+ * "simples" já existente aqui), o campo só é lido se estiver preenchido. Grava a leitura de
+ * fronteira em `leituras_hodometro` (`fleet`), nunca uma segunda fonte da verdade.
  */
 export function TripCommandsPanel({ trip }: { trip: Trip }) {
   const { hasPermission } = usePermissions();
@@ -45,6 +51,8 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
 
   const [openDialog, setOpenDialog] = React.useState<DialogCommandKey | null>(null);
   const [text, setText] = React.useState("");
+  const [departureOdometerKm, setDepartureOdometerKm] = React.useState("");
+  const [arrivalOdometerKm, setArrivalOdometerKm] = React.useState("");
 
   const accept = useAcceptTripMutation();
   const dispatch = useDispatchTripMutation();
@@ -68,6 +76,31 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
     }
   }
 
+  async function runDispatch(mutation: typeof dispatch | typeof start, key: "dispatch" | "start", successMessage: string) {
+    try {
+      await mutation.mutateAsync({
+        tripId: trip.id,
+        variables: departureOdometerKm ? { departure_odometer_km: departureOdometerKm } : undefined,
+      });
+      toast.success(successMessage);
+      setDepartureOdometerKm("");
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : `Não foi possível executar "${key}".`);
+    }
+  }
+
+  async function runFinish() {
+    try {
+      await finish.mutateAsync({
+        tripId: trip.id, variables: arrivalOdometerKm ? { arrival_odometer_km: arrivalOdometerKm } : undefined,
+      });
+      toast.success("Viagem finalizada.");
+      setArrivalOdometerKm("");
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Não foi possível executar \"finish\".");
+    }
+  }
+
   async function runWithText(key: DialogCommandKey) {
     try {
       if (key === "interromper") await interromper.mutateAsync({ tripId: trip.id, variables: { notes: text } });
@@ -83,6 +116,7 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
   }
 
   const buttons: React.ReactNode[] = [];
+  let odometerField: React.ReactNode = null;
 
   if (status === "PLANEJADA" && hasPermission("freight.trip.edit")) {
     buttons.push(
@@ -91,23 +125,43 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
       </Button>
     );
   }
+  if (status === "LIBERADA" && (hasPermission("freight.trip.dispatch") || hasPermission("freight.trip.start"))) {
+    odometerField = (
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="trip-departure-odometer-km">Hodômetro de saída (opcional)</Label>
+        <Input
+          id="trip-departure-odometer-km" type="number" step="0.01" className="w-40"
+          value={departureOdometerKm} onChange={(event) => setDepartureOdometerKm(event.target.value)}
+        />
+      </div>
+    );
+  }
   if (status === "LIBERADA" && hasPermission("freight.trip.dispatch")) {
     buttons.push(
-      <Button key="dispatch" onClick={() => runSimple("dispatch", dispatch, "Viagem despachada.")}>
+      <Button key="dispatch" onClick={() => runDispatch(dispatch, "dispatch", "Viagem despachada.")}>
         Despachar
       </Button>
     );
   }
   if (status === "LIBERADA" && hasPermission("freight.trip.start")) {
     buttons.push(
-      <Button key="start" onClick={() => runSimple("start", start, "Viagem iniciada.")}>
+      <Button key="start" onClick={() => runDispatch(start, "start", "Viagem iniciada.")}>
         Iniciar
       </Button>
     );
   }
   if (status === "EM_ENTREGA" && hasPermission("freight.trip.finish")) {
+    odometerField = (
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="trip-arrival-odometer-km">Hodômetro de chegada (opcional)</Label>
+        <Input
+          id="trip-arrival-odometer-km" type="number" step="0.01" className="w-40"
+          value={arrivalOdometerKm} onChange={(event) => setArrivalOdometerKm(event.target.value)}
+        />
+      </div>
+    );
     buttons.push(
-      <Button key="finish" onClick={() => runSimple("finish", finish, "Viagem finalizada.")}>
+      <Button key="finish" onClick={() => runFinish()}>
         Finalizar
       </Button>
     );
@@ -164,6 +218,7 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
 
   return (
     <div className="flex flex-col gap-3">
+      {odometerField}
       {buttons.length > 0 ? <div className="flex flex-wrap gap-2">{buttons}</div> : null}
 
       <Sheet open={openDialog !== null} onOpenChange={(open) => !open && setOpenDialog(null)}>

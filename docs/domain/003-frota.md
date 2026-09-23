@@ -183,7 +183,7 @@ Dependências proibidas, Dono da Timeline e Capacidade Offline. Ver
 ## Leitura de Hodômetro
 
 - **Objetivo**: Registro histórico (D037) de leituras de hodômetro do veículo, vindas de múltiplas
-  origens (abastecimento, checklist, manual).
+  origens (abastecimento, checklist, manual, despacho/encerramento de Viagem).
 - **Responsabilidades**: Ser a fonte única da quilometragem do veículo — Hodômetro pertence a
   `fleet` (D034), mesmo quando o dado chega via evento de outro módulo.
 - **O que não faz**: Não é editável — é inserida, nunca alterada (D037).
@@ -192,11 +192,22 @@ Dependências proibidas, Dono da Timeline e Capacidade Offline. Ver
 - **Principais relacionamentos**: Veículo Tracionador (N:1).
 - **Eventos que publica**: `HodometroAtualizado` (novo).
 - **Eventos que consome**: `AbastecimentoRegistrado` (`freight`), `ChecklistConcluido`
-  (`maintenance`) — lê a leitura informada nesses fluxos e gera um novo registro aqui, nunca o
-  contrário.
+  (`maintenance`), `ViagemDespachada`/`ViagemFinalizada` (`freight` — **Reconciliado, V1
+  Operational Hardening, Parte 2**) — lê a leitura informada nesses fluxos e gera um novo registro
+  aqui, nunca o contrário.
 - **Invariantes**: uma nova Leitura de Hodômetro nunca é menor que a última leitura registrada para
   o mesmo veículo — **"um abastecimento não pode reduzir o hodômetro"** (exemplo oficial registrado
   para `shared/INVARIANTS.md`).
+- **Reconciliado (V1 Operational Hardening, Parte 2)**: duas novas origens, `DESPACHO_VIAGEM`/
+  `ENCERRAMENTO_VIAGEM`, marcam precisamente as leituras de fronteira de uma Viagem (`KM_INICIAL`/
+  `KM_FINAL`, já previsto abaixo em `VIAGEM_ID`) — mais confiável que tomar a primeira/última
+  leitura cronológica com o mesmo `VIAGEM_ID`, que poderia ser corrompida por uma leitura de
+  Checklist/Abastecimento não relacionada ao ciclo de despacho/encerramento. `TripOdometerRecorder`
+  (`fleet`, não-HTTP, mesmo espírito de `VehicleAvailabilityProjector`) é o único ponto que grava
+  essas duas origens, chamado por `DispatchTripHandler`/`FinishTripHandler` (`freight`) depois que
+  a própria transação da Viagem já commitou — sem migration: `origem`/`viagem_id` já existiam como
+  colunas livres (`String`/UUID nullable, sem CHECK), só o vocabulário Python ganhou dois valores
+  novos.
 - **Regras de negócio associadas**: D017/D018/D037 (histórica, append-only), D034 (dono único).
 - **Estados**: Não aplicável — é ela própria um registro histórico.
 - **Auditoria**: D007.

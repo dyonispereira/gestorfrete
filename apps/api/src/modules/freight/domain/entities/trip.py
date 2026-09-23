@@ -294,6 +294,14 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         self.receita_realizada = value
         self._recompute_realized_margin()
 
+    def update_km_rodado(self, *, value: Decimal | None) -> None:
+        """V1 Operational Hardening, Parte 2 — chamado por `TripInternalTransitions` a partir de
+        `TripOdometerRecorder` (`fleet`), `leitura_encerramento.valor_km - leitura_despacho.
+        valor_km`. `None` enquanto a Viagem não tiver as duas leituras de fronteira — nunca
+        estimado (histórico bruto continua só em `leituras_hodometro`, D034)."""
+
+        self.km_rodado = value
+
     def _recompute_realized_margin(self) -> None:
         """D392 — `margem_realizada`/`desvio_financeiro` recalculados pela Application a cada
         atualização de custo/receita realizado, nunca por trigger de banco (D365-consistent);

@@ -7,6 +7,8 @@ import type {
   CancelarTripRequest,
   CloseAdministrativeTripRequest,
   CreateTripRequest,
+  DispatchTripRequest,
+  FinishTripRequest,
   InterromperTripRequest,
   UpdateTripRequest,
 } from "@gestorfrete/types";
@@ -78,15 +80,21 @@ export function useAcceptTripMutation() {
 }
 
 export function useDispatchTripMutation() {
-  return useTripCommandMutation<void>((tripId) => tripsService.dispatchTrip(tripId));
+  return useTripCommandMutation<DispatchTripRequest | undefined>((tripId, body) =>
+    tripsService.dispatchTrip(tripId, body)
+  );
 }
 
 export function useStartTripMutation() {
-  return useTripCommandMutation<void>((tripId) => tripsService.startTrip(tripId));
+  return useTripCommandMutation<DispatchTripRequest | undefined>((tripId, body) =>
+    tripsService.startTrip(tripId, body)
+  );
 }
 
 export function useFinishTripMutation() {
-  return useTripCommandMutation<void>((tripId) => tripsService.finishTrip(tripId));
+  return useTripCommandMutation<FinishTripRequest | undefined>((tripId, body) =>
+    tripsService.finishTrip(tripId, body)
+  );
 }
 
 export function useInterromperTripMutation() {

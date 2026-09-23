@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
@@ -12,6 +13,7 @@ from modules.drivers.infrastructure.persistence.repositories.sqlalchemy_driver_r
     SqlAlchemyDriverRepository,
 )
 from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
+from modules.fleet.application.trip_odometer_recorder import TripOdometerRecorder
 from modules.fleet.infrastructure.persistence.repositories.sqlalchemy_vehicle_repository import (
     SqlAlchemyVehicleRepository,
 )
@@ -41,6 +43,7 @@ class DispatchTripCommand(Command):
     actor: AuthenticatedActor
     trip_id: uuid.UUID
     origin: str  # 'portal_gestor' (commands/dispatch) ou 'app_motorista' (commands/start)
+    hodometro_saida_km: Decimal | None = None
 
 
 class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
@@ -51,7 +54,10 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
     formato "consumidor futuro de evento, síncrono" de D247/D375/D390, primeira vez na direção
     `freight`→`documents`). Mesma chamada síncrona pós-commit agora também abre o impedimento
     `VIAGEM` em `fleet` (`VehicleAvailabilityProjector.apply_trip_dispatched`) — lado que faltava
-    do projetor de Disponibilidade, só o lado `maintenance` estava conectado até aqui."""
+    do projetor de Disponibilidade, só o lado `maintenance` estava conectado até aqui. V1
+    Operational Hardening, Parte 2 — `hodometro_saida_km` (opcional) grava a leitura de fronteira
+    de despacho via `TripOdometerRecorder` (`fleet`, D034); omitido, a Viagem simplesmente não
+    entra no cálculo de `km_rodado` depois — nunca estimado."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -124,6 +130,11 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
             await VehicleAvailabilityProjector().apply_trip_dispatched(
                 vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, driver_id=trip.motorista_id,
                 implement_id=allocation.implemento_id if allocation is not None else None, at=now,
+            )
+
+        if command.hodometro_saida_km is not None and trip.veiculo_tracionador_id is not None:
+            await TripOdometerRecorder().record_departure(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, value_km=command.hodometro_saida_km, now=now,
             )
 
         return TripDTO.from_entity(trip)

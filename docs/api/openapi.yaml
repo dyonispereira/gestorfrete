@@ -2254,6 +2254,19 @@ paths:
       summary: "Despacha a viagem (LIBERADA → EM_DESLOCAMENTO), acionado pelo Gestor"
       parameters:
         - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                departure_odometer_km:
+                  type: string
+                  description: >
+                    Opcional (V1 Operational Hardening, Parte 2) — grava a leitura de fronteira de
+                    despacho em `leituras_hodometro` (`fleet`, D034); omitido, a Viagem fica sem
+                    `km_rodado` depois — nunca estimado.
       responses:
         "200":
           description: Viagem despachada
@@ -2264,6 +2277,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   /viagens/{id}/commands/start:
@@ -2272,6 +2286,14 @@ paths:
       summary: "Motorista inicia o deslocamento (LIBERADA → EM_DESLOCAMENTO), via app"
       parameters:
         - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                departure_odometer_km: { type: string, description: "Mesmo campo/efeito de `commands/dispatch`." }
       responses:
         "200":
           description: Viagem iniciada
@@ -2282,6 +2304,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   /viagens/{id}/commands/finish:
@@ -2291,6 +2314,19 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdPathParam"
         - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                arrival_odometer_km:
+                  type: string
+                  description: >
+                    Opcional (V1 Operational Hardening, Parte 2) — grava a leitura de fronteira de
+                    encerramento; com a leitura de despacho também presente, `Trip.km_rodado` é
+                    calculado e gravado — nunca estimado quando faltar uma das duas.
       responses:
         "200":
           description: Viagem finalizada
@@ -11262,7 +11298,14 @@ components:
         realized_margin: { type: string }
         predicted_margin: { type: string }
         realized_margin_pct: { type: string, nullable: true, description: "`null` quando `realized_revenue` é zero." }
-        km: { type: string, nullable: true, description: "`null` — gap registrado, nunca aproximado (docs/domain/012-resultado-gerencial.md)." }
+        km:
+          type: string
+          nullable: true
+          description: >
+            Derivado de `leituras_hodometro` (`fleet`), V1 Operational Hardening, Parte 2. `null`
+            quando a Viagem (ou QUALQUER Viagem do grupo, nas dimensões agregadas) não tiver as
+            duas leituras de fronteira — nunca uma soma parcial disfarçada de total, nunca uma
+            aproximação (docs/domain/012-resultado-gerencial.md).
         revenue_per_km: { type: string, nullable: true }
         cost_per_km: { type: string, nullable: true }
         margin_per_km: { type: string, nullable: true }
@@ -11305,6 +11348,11 @@ components:
         other_costs_realized: { type: string }
         operational_result: { type: string, description: "Resultado Operacional de Viagens — sem Manutenção/Outros Custos." }
         operational_margin_pct: { type: string, nullable: true }
+        operational_cost_per_km:
+          type: string
+          nullable: true
+          description: "V1 Operational Hardening, Parte 3 — só Viagens (`trip_cost_realized / km`). `null` sob a mesma regra de `totals.km` (nunca uma fração de KM indisponível)."
+        operational_result_per_km: { type: string, nullable: true, description: "`operational_result / km`." }
         totals:
           allOf:
             - $ref: "#/components/schemas/ResultTotals"

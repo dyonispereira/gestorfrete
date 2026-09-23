@@ -30,8 +30,12 @@ class TripAggregate:
     """Soma pura das colunas já-realizadas/previstas de `viagens` (D008/D090 — Resultado Gerencial
     nunca recalcula o que `freight`/`financial` já são donos de calcular, só agrega). Base comum de
     Visão Geral/Viagem/Veículo/Cliente/Motorista — cada dimensão só muda o `GROUP BY`, nunca a
-    fórmula. `km` fica `None` quando nenhuma Viagem do grupo tem `km_rodado` preenchido (gap
-    registrado em `docs/domain/012-resultado-gerencial.md` — nunca aproximado)."""
+    fórmula. `km` fica `None` não só quando NENHUMA Viagem do grupo tem `km_rodado`, mas também
+    quando APENAS ALGUMAS têm (V1 Operational Hardening, Parte 3) — `SUM()` ignora `NULL` em SQL
+    puro, então um grupo parcial retornaria uma soma incompleta disfarçada de total; mostrar essa
+    soma parcial como se fosse o KM real do grupo seria exatamente o tipo de aproximação silenciosa
+    que o usuário pediu para nunca acontecer. `km` só é um número quando toda Viagem do grupo tem
+    `km_rodado` conhecido — caso contrário, `None` ("Indisponível")."""
 
     trip_count: int
     predicted_revenue: Decimal
@@ -57,9 +61,11 @@ def _trip_base_filters(
 
 
 def _row_to_trip_aggregate(row: tuple[Any, ...]) -> TripAggregate:
+    trip_count, km_known_count, km_sum = row[0], row[5], row[6]
+    km = km_sum if trip_count > 0 and km_known_count == trip_count else None
     return TripAggregate(
-        trip_count=row[0], predicted_revenue=row[1], realized_revenue=row[2],
-        predicted_cost=row[3], realized_cost=row[4], km=row[5],
+        trip_count=trip_count, predicted_revenue=row[1], realized_revenue=row[2],
+        predicted_cost=row[3], realized_cost=row[4], km=km,
     )
 
 
@@ -83,6 +89,7 @@ class ManagementResultReadRepository:
             func.coalesce(func.sum(TripModel.receita_realizada), _ZERO),
             func.coalesce(func.sum(TripModel.custo_previsto), _ZERO),
             func.coalesce(func.sum(TripModel.custo_realizado), _ZERO),
+            func.count(TripModel.km_rodado),
             func.sum(TripModel.km_rodado),
         ).where(*_trip_base_filters(tenant_id, date_from, date_to))
         row = (await self._session.execute(stmt)).one()
@@ -118,6 +125,7 @@ class ManagementResultReadRepository:
                 func.coalesce(func.sum(TripModel.receita_realizada), _ZERO),
                 func.coalesce(func.sum(TripModel.custo_previsto), _ZERO),
                 func.coalesce(func.sum(TripModel.custo_realizado), _ZERO),
+                func.count(TripModel.km_rodado),
                 func.sum(TripModel.km_rodado),
             )
             .where(*_trip_base_filters(tenant_id, date_from, date_to), group_by_column.is_not(None))

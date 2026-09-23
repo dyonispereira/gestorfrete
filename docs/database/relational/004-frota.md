@@ -271,8 +271,15 @@ Entidade **Histórica/Time Series** (D037/D050) — nunca uma coluna `hodometro_
 `veiculos_tracionadores`. Volume "Alto" ([`../../information-model/HIGH_VOLUME_ENTITIES.md`](../../information-model/HIGH_VOLUME_ENTITIES.md)) — particionada por mês (D179), mesmo padrão de
 `viagem_status_history`.
 
+Reconciliado (V1 Operational Hardening, Parte 2): dois novos valores de `origem` —
+`DESPACHO_VIAGEM`/`ENCERRAMENTO_VIAGEM`, as leituras de fronteira gravadas por
+`TripOdometerRecorder` (`fleet`) no despacho/encerramento de uma Viagem (ver
+`docs/domain/003-frota.md`). Sem migration: a migration real (não esta DDL congelada) já mapeia
+`origem` como `String` livre, sem `CHECK`/enum físico (mesmo padrão de `ORDEM_SERVICO`, adicionada
+antes sem alteração de schema) — só o vocabulário do lado Python ganha os dois valores novos.
+
 ```sql
-CREATE TYPE leituras_hodometro_origem_enum AS ENUM ('ABASTECIMENTO', 'CHECKLIST', 'MANUAL', 'TELEMETRIA');
+CREATE TYPE leituras_hodometro_origem_enum AS ENUM ('ABASTECIMENTO', 'CHECKLIST', 'MANUAL', 'TELEMETRIA', 'ORDEM_SERVICO', 'DESPACHO_VIAGEM', 'ENCERRAMENTO_VIAGEM');
 
 CREATE TABLE leituras_hodometro (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),

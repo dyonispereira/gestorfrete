@@ -117,7 +117,7 @@ CREATE TABLE viagens (
     margem_realizada                 NUMERIC(14,2),   -- não gerada: só é definitiva em ENCERRADA (D019), calculada pela aplicação
     desvio_financeiro                NUMERIC(14,2),
 
-    km_rodado                       NUMERIC(10,2),    -- derivado de tracking, D081 projeção — não fonte de verdade
+    km_rodado                       NUMERIC(10,2),    -- Reconciliado (V1 Op. Hardening, Parte 2): derivado de leituras_hodometro (fleet), não mais de tracking (nunca implementado) — null até ter as 2 leituras de fronteira
 
     criado_em                       TIMESTAMPTZ NOT NULL DEFAULT now(),
     criado_por                      UUID,

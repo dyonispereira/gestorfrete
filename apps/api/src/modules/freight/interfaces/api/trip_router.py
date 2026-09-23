@@ -43,6 +43,8 @@ from modules.freight.interfaces.schemas.trip_schemas import (
     CancelarTripRequest,
     CloseAdministrativeTripRequest,
     CreateTripRequest,
+    DispatchTripRequest,
+    FinishTripRequest,
     InterromperTripRequest,
     TripResponse,
     UpdateTripRequest,
@@ -191,28 +193,46 @@ async def accept_trip(
 
 @router.post("/{trip_id}/commands/dispatch", response_model=TripResponse)
 async def dispatch_trip(
-    trip_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("freight.trip.dispatch"))
+    trip_id: uuid.UUID, body: DispatchTripRequest | None = None,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.dispatch")),
 ) -> TripResponse:
     handler = DispatchTripHandler()
-    dto = await handler.handle(DispatchTripCommand(actor=actor, trip_id=trip_id, origin="portal_gestor"))
+    dto = await handler.handle(
+        DispatchTripCommand(
+            actor=actor, trip_id=trip_id, origin="portal_gestor",
+            hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+        )
+    )
     return TripResponse.from_dto(dto)
 
 
 @router.post("/{trip_id}/commands/start", response_model=TripResponse)
 async def start_trip(
-    trip_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("freight.trip.start"))
+    trip_id: uuid.UUID, body: DispatchTripRequest | None = None,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.start")),
 ) -> TripResponse:
     handler = DispatchTripHandler()
-    dto = await handler.handle(DispatchTripCommand(actor=actor, trip_id=trip_id, origin="app_motorista"))
+    dto = await handler.handle(
+        DispatchTripCommand(
+            actor=actor, trip_id=trip_id, origin="app_motorista",
+            hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+        )
+    )
     return TripResponse.from_dto(dto)
 
 
 @router.post("/{trip_id}/commands/finish", response_model=TripResponse)
 async def finish_trip(
-    trip_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("freight.trip.finish"))
+    trip_id: uuid.UUID, body: FinishTripRequest | None = None,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.finish")),
 ) -> TripResponse:
     handler = FinishTripHandler()
-    dto = await handler.handle(FinishTripCommand(actor=actor, trip_id=trip_id))
+    dto = await handler.handle(
+        FinishTripCommand(
+            actor=actor, trip_id=trip_id,
+            hodometro_chegada_km=body.arrival_odometer_km if body is not None else None,
+        )
+    )
     return TripResponse.from_dto(dto)
 
 

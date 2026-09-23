@@ -3,12 +3,15 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import DomainError, NotFoundError
 from modules.fleet.application.availability_projector import VehicleAvailabilityProjector
+from modules.fleet.application.trip_odometer_recorder import TripOdometerRecorder
 from modules.freight.application.dtos.trip_dto import TripDTO
+from modules.freight.application.trip_internal_transitions import TripInternalTransitions
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.delivery_status import DeliveryStatus
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
@@ -32,6 +35,7 @@ from shared_kernel.domain.actor import AuthenticatedActor
 class FinishTripCommand(Command):
     actor: AuthenticatedActor
     trip_id: uuid.UUID
+    hodometro_chegada_km: Decimal | None = None
 
 
 class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
@@ -39,7 +43,11 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
     (D235): todas as Entregas em estado terminal, e toda Entrega `CONCLUIDA` com Canhoto
     `REGISTRADO`. Fecha o impedimento `VIAGEM` em `fleet` após o commit — libera o veículo em
     Disponibilidade só se nenhum outro impedimento (ex. uma OS aberta no mesmo veículo) continuar
-    ativo (`VehicleAvailabilityProjector.apply_trip_ended`)."""
+    ativo (`VehicleAvailabilityProjector.apply_trip_ended`). V1 Operational Hardening, Parte 2 —
+    `hodometro_chegada_km` (opcional) grava a leitura de fronteira de encerramento via
+    `TripOdometerRecorder` (`fleet`, D034); quando a Viagem também tem a leitura de despacho,
+    `Trip.km_rodado` é calculado e gravado via `TripInternalTransitions.update_km_rodado` — nunca
+    estimado quando faltar qualquer uma das duas leituras."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -98,5 +106,15 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
             await VehicleAvailabilityProjector().apply_trip_ended(
                 vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, at=now
             )
+
+        if command.hodometro_chegada_km is not None and trip.veiculo_tracionador_id is not None:
+            recorder = TripOdometerRecorder()
+            await recorder.record_arrival(
+                vehicle_id=trip.veiculo_tracionador_id, trip_id=trip.id, value_km=command.hodometro_chegada_km,
+                now=now,
+            )
+            km_rodado = await recorder.get_km_rodado(trip_id=trip.id)
+            if km_rodado is not None:
+                await TripInternalTransitions().update_km_rodado(trip_id=trip.id, value=km_rodado)
 
         return TripDTO.from_entity(trip)

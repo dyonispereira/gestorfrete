@@ -104,6 +104,20 @@ class UpdateTripRequest(BaseModel):
     janela_programada: datetime | None = None
 
 
+class DispatchTripRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    # V1 Operational Hardening, Parte 2 — opcional: sem hodômetro na Viagem inteira, sem 2ª fonte
+    # da verdade, `km_rodado` simplesmente fica indisponível depois (nunca estimado).
+    departure_odometer_km: Decimal | None = None
+
+
+class FinishTripRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    arrival_odometer_km: Decimal | None = None
+
+
 class InterromperTripRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

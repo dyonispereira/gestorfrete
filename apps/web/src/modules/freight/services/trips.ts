@@ -3,6 +3,8 @@ import type {
   CancelarTripRequest,
   CloseAdministrativeTripRequest,
   CreateTripRequest,
+  DispatchTripRequest,
+  FinishTripRequest,
   InterromperTripRequest,
   PaginatedResponse,
   Trip,
@@ -58,16 +60,16 @@ export function acceptTrip(id: string): Promise<Trip> {
   return apiFetch<Trip>(`/viagens/${id}/commands/accept`, { method: "POST" });
 }
 
-export function dispatchTrip(id: string): Promise<Trip> {
-  return apiFetch<Trip>(`/viagens/${id}/commands/dispatch`, { method: "POST" });
+export function dispatchTrip(id: string, body?: DispatchTripRequest): Promise<Trip> {
+  return apiFetch<Trip>(`/viagens/${id}/commands/dispatch`, { method: "POST", body: body ?? {} });
 }
 
-export function startTrip(id: string): Promise<Trip> {
-  return apiFetch<Trip>(`/viagens/${id}/commands/start`, { method: "POST" });
+export function startTrip(id: string, body?: DispatchTripRequest): Promise<Trip> {
+  return apiFetch<Trip>(`/viagens/${id}/commands/start`, { method: "POST", body: body ?? {} });
 }
 
-export function finishTrip(id: string): Promise<Trip> {
-  return apiFetch<Trip>(`/viagens/${id}/commands/finish`, { method: "POST" });
+export function finishTrip(id: string, body?: FinishTripRequest): Promise<Trip> {
+  return apiFetch<Trip>(`/viagens/${id}/commands/finish`, { method: "POST", body: body ?? {} });
 }
 
 export function interromperTrip(id: string, body: InterromperTripRequest): Promise<Trip> {

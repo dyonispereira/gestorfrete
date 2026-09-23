@@ -326,6 +326,17 @@ async def _fixate_trip_financials(
         await session.commit()
 
 
+async def _set_km_rodado(trip_id: uuid.UUID, value: Decimal | None) -> None:
+    """V1 Operational Hardening, Parte 3 — simula `Trip.km_rodado` já calculado pelo pareamento de
+    hodômetro (Parte 2), sem precisar percorrer despacho/encerramento reais aqui (já provado em
+    `test_trip_odometer_km_realizado.py`) — só o suficiente para testar a agregação de KM."""
+
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        await session.execute(update(TripModel).where(TripModel.id == trip_id).values(km_rodado=value))
+        await session.commit()
+
+
 async def _create_work_order(client: AsyncClient, headers: dict[str, str], vehicle_id: uuid.UUID) -> uuid.UUID:
     resp = await client.post(
         "/api/v1/ordens-servico", headers=headers,
@@ -608,3 +619,96 @@ async def test_vehicle_detail_drill_down_traces_cost_to_originating_payable(
     assert str(scenario["payable_maintenance"]) in cost_origin_ids
     # A CP rejeitada e a da OS cancelada nunca aparecem no drill-down — mesmo filtro da soma.
     assert len(body["cost_origins"]) == 2  # Manutenção (1200) + Outros Custos (150)
+
+
+# ----------------------------------------------------------------------------------------------
+# V1 Operational Hardening, Parte 3 — Resultado Gerencial por KM. `km_rodado` simulado direto (o
+# pareamento de hodômetro real já está provado em `test_trip_odometer_km_realizado.py`) — aqui o
+# que está sob teste é a agregação: nunca um `SUM()` parcial disfarçado de total.
+# ----------------------------------------------------------------------------------------------
+
+
+async def test_trip_km_metrics_available_when_km_rodado_is_known(
+    client: AsyncClient, scenario: dict[str, Any]
+) -> None:
+    await _set_km_rodado(scenario["trip_3"], Decimal("400.00"))
+
+    resp = await client.get(
+        "/api/v1/analytics/resultado-gerencial/viagens", headers=scenario["headers"], params=scenario["period"]
+    )
+    assert resp.status_code == 200, resp.text
+    row = next(r for r in resp.json()["data"] if r["trip_id"] == str(scenario["trip_3"]))
+    totals = row["totals"]
+    assert Decimal(totals["km"]) == Decimal("400.00")
+    assert Decimal(totals["revenue_per_km"]) == Decimal("5.00")  # 2000 / 400
+    assert Decimal(totals["cost_per_km"]) == Decimal("2.00")  # 800 / 400
+    assert Decimal(totals["margin_per_km"]) == Decimal("3.00")  # 1200 / 400
+
+
+async def test_trip_km_metrics_unavailable_when_km_rodado_is_null(
+    client: AsyncClient, scenario: dict[str, Any]
+) -> None:
+    """Regra fundamental do usuário: sem KM, nunca estimar — `km`/`*_per_km` ficam `null`, nunca
+    `0` (o que pareceria "sem receita/custo por km" em vez de "não sabemos")."""
+
+    resp = await client.get(
+        "/api/v1/analytics/resultado-gerencial/viagens", headers=scenario["headers"], params=scenario["period"]
+    )
+    assert resp.status_code == 200, resp.text
+    row = next(r for r in resp.json()["data"] if r["trip_id"] == str(scenario["trip_1"]))
+    totals = row["totals"]
+    assert totals["km"] is None
+    assert totals["revenue_per_km"] is None
+    assert totals["cost_per_km"] is None
+    assert totals["margin_per_km"] is None
+
+
+async def test_vehicle_km_unavailable_when_only_some_trips_of_the_group_have_it(
+    client: AsyncClient, scenario: dict[str, Any]
+) -> None:
+    """O caso central desta Parte: `SUM()` em SQL ignora `NULL` — sem essa correção, um Veículo com
+    2 Viagens (só 1 com KM conhecido) mostraria o KM da única Viagem conhecida como se fosse o total
+    do Veículo. V1 tem trip_1 (KM conhecido) + trip_2 (KM desconhecido) — o grupo inteiro precisa
+    ficar "Indisponível", nunca uma soma parcial disfarçada de completa."""
+
+    await _set_km_rodado(scenario["trip_1"], Decimal("300.00"))
+    # trip_2 (mesmo Veículo V1) fica sem km_rodado — grupo incompleto.
+
+    resp = await client.get(
+        "/api/v1/analytics/resultado-gerencial/veiculos", headers=scenario["headers"], params=scenario["period"]
+    )
+    assert resp.status_code == 200, resp.text
+    vehicle_1 = next(v for v in resp.json() if v["vehicle_id"] == str(scenario["vehicle_1"]))
+    assert vehicle_1["totals"]["km"] is None
+    assert vehicle_1["operational_cost_per_km"] is None
+    assert vehicle_1["operational_result_per_km"] is None
+
+    # Mas a Viagem individual (trip_1) continua mostrando o KM que ela de fato tem — o "Indisponível"
+    # é só no agregado do Veículo, nunca inventado para esconder o dado que existe de verdade.
+    trips_resp = await client.get(
+        "/api/v1/analytics/resultado-gerencial/viagens", headers=scenario["headers"], params=scenario["period"]
+    )
+    trip_1_row = next(r for r in trips_resp.json()["data"] if r["trip_id"] == str(scenario["trip_1"]))
+    assert Decimal(trip_1_row["totals"]["km"]) == Decimal("300.00")
+
+
+async def test_vehicle_operational_cost_per_km_excludes_maintenance_total_includes_it(
+    client: AsyncClient, scenario: dict[str, Any]
+) -> None:
+    """"Custo operacional/km" (só Viagens) vs. "Custo total/km" (`totals.cost_per_km`, inclui
+    Manutenção+Outros Custos) — mesma distinção Operacional×Total já provada em R$, agora em KM."""
+
+    await _set_km_rodado(scenario["trip_1"], Decimal("100.00"))
+    await _set_km_rodado(scenario["trip_2"], Decimal("150.00"))
+    # V1 completo: 250 km. Custo Viagens = 500 (300+200); Manutenção+Outros = 1350; Total = 1850.
+
+    resp = await client.get(
+        "/api/v1/analytics/resultado-gerencial/veiculos", headers=scenario["headers"], params=scenario["period"]
+    )
+    assert resp.status_code == 200, resp.text
+    vehicle_1 = next(v for v in resp.json() if v["vehicle_id"] == str(scenario["vehicle_1"]))
+    assert Decimal(vehicle_1["totals"]["km"]) == Decimal("250.00")
+    assert Decimal(vehicle_1["operational_cost_per_km"]) == Decimal("2.00")  # 500 / 250 — só Viagens
+    assert Decimal(vehicle_1["totals"]["cost_per_km"]) == Decimal("7.40")  # 1850 / 250 — Total
+    assert Decimal(vehicle_1["operational_result_per_km"]) == Decimal("2.00")  # (1000-500) / 250
+    assert Decimal(vehicle_1["totals"]["margin_per_km"]) == Decimal("-3.40")  # (1000-1850) / 250 — negativo

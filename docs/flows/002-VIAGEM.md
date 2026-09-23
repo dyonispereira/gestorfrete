@@ -81,6 +81,13 @@ terminal: `Concluída`, `Devolvida` ou `Cancelada`.
 | `INTERROMPIDA` | `CANCELADA` | Perda definitiva (ex: sinistro com perda total) |
 | `RASCUNHO`/`PLANEJADA`/`AGUARDANDO_CHECKLIST`/`LIBERADA` | `CANCELADA` | Cancelamento antes do início do deslocamento |
 
+**Reconciliado (V1 Operational Hardening, Parte 2)**: `LIBERADA→EM_DESLOCAMENTO` (despacho) e
+`EM_ENTREGA→FINALIZADA` (encerramento) aceitam, opcionalmente, o hodômetro do Veículo no momento —
+gravado como leitura de fronteira em `leituras_hodometro` (`fleet`, D034, ver
+[`003-frota.md`](../domain/003-frota.md)), nunca uma segunda fonte da verdade. Com as duas leituras,
+`Trip.km_rodado = leitura_encerramento − leitura_despacho`; sem alguma delas, fica indisponível —
+nunca estimado.
+
 #### Transições inválidas (normativas)
 
 - **Não é permitido** ir de `RASCUNHO` diretamente para `EM_TRANSITO` — a viagem precisa passar por

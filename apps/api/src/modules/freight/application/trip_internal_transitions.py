@@ -156,6 +156,19 @@ class TripInternalTransitions:
             await trip_repo.add(trip)
             await uow.commit()
 
+    async def update_km_rodado(self, *, trip_id: uuid.UUID, value: Decimal | None) -> None:
+        """V1 Operational Hardening, Parte 2 — chamado por `TripOdometerRecorder` (`fleet`) depois
+        que a leitura de encerramento é pareada com a de despacho."""
+
+        async with SQLAlchemyUnitOfWork() as uow:
+            trip_repo = SqlAlchemyTripRepository(uow.session)
+            trip = await trip_repo.get_by_id(trip_id)
+            if trip is None:
+                raise NotFoundError("FREIGHT_TRIP_NOT_FOUND", "Viagem não encontrada.")
+            trip.update_km_rodado(value=value)
+            await trip_repo.add(trip)
+            await uow.commit()
+
     async def record_fiscal_transition(self, *, trip_id: uuid.UUID, status: TripFiscalStatus, now: datetime) -> None:
         """Simula o futuro consumidor de evento de `documents` (D375)."""
 
