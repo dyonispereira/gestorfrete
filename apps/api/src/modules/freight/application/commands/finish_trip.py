@@ -18,6 +18,9 @@ from modules.freight.domain.value_objects.status_history_dimension import Status
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_delivery_repository import (
     SqlAlchemyDeliveryRepository,
 )
+from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_allocation_repository import (
+    SqlAlchemyTripAllocationRepository,
+)
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_proof_of_delivery_repository import (
     SqlAlchemyProofOfDeliveryRepository,
 )
@@ -47,7 +50,9 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
     `hodometro_chegada_km` (opcional) grava a leitura de fronteira de encerramento via
     `TripOdometerRecorder` (`fleet`, D034); quando a Viagem também tem a leitura de despacho,
     `Trip.km_rodado` é calculado e gravado via `TripInternalTransitions.update_km_rodado` — nunca
-    estimado quando faltar qualquer uma das duas leituras."""
+    estimado quando faltar qualquer uma das duas leituras. V1 Operational Hardening, Parte 1 —
+    encerra a Alocação `VIGENTE` da Viagem (→ `ENCERRADA`, `016-trip-resources.md`) na mesma
+    transação, para que o Veículo volte a ser alocável em outra Viagem."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -58,6 +63,7 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
             history_repo = SqlAlchemyTripStatusHistoryRepository(uow.session)
             delivery_repo = SqlAlchemyDeliveryRepository(uow.session)
             pod_repo = SqlAlchemyProofOfDeliveryRepository(uow.session)
+            allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
 
             trip = await trip_repo.get_by_id(command.trip_id)
             if trip is None:
@@ -76,6 +82,11 @@ class FinishTripHandler(CommandHandler[FinishTripCommand, TripDTO]):
 
             trip.finish()
             await trip_repo.add(trip)
+
+            current_allocation = await allocation_repo.get_current_for_trip(trip.id)
+            if current_allocation is not None:
+                current_allocation.end()
+                await allocation_repo.add(current_allocation)
 
             now = datetime.now(timezone.utc)
             await history_repo.add(

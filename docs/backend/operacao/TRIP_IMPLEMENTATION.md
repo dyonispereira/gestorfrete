@@ -85,6 +85,13 @@ colunas em `Trip` na mesma transação (`Trip.set_current_allocation(...)`).
   `SUBSTITUIDA` (imutável a partir daí), uma nova linha `VIGENTE` é inserida com `motivo_troca`
   (`reason`, obrigatório no comando, opcional na base física). Permitido de `PLANEJADA` até
   `EM_ENTREGA` (`FREIGHT_TRIP_NOT_ALLOCATABLE` fora dessa janela). Publica `ViagemReatribuida`.
+- **Reconciliado (V1 Operational Hardening, Parte 1)**: `FinishTripHandler`, `CancelarTripHandler`
+  e `CloseAdministrativeTripHandler` buscam a Alocação `VIGENTE` da Viagem e chamam
+  `TripAllocation.end()` (→ `ENCERRADA`) na mesma transação da transição de status — antes de
+  `uow.commit()`, mesmo Aggregate (D188), sem cruzar módulo. `exists_vigente_for_vehicle_excluding_
+  trip` (usada por `CreateTripAllocationHandler`) permanece inalterada; ela só enxerga `VIGENTE`,
+  então uma Alocação `ENCERRADA` simplesmente para de bloquear o Veículo. Gap do Go-Live Audit
+  fechado: antes, nenhum dos três handlers tocava a Alocação, que ficava `VIGENTE` para sempre.
 
 ## Máquina de estados — Status Operacional
 

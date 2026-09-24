@@ -11,6 +11,9 @@ from modules.fleet.application.availability_projector import VehicleAvailability
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
+from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_allocation_repository import (
+    SqlAlchemyTripAllocationRepository,
+)
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_repository import (
     SqlAlchemyTripRepository,
 )
@@ -30,9 +33,11 @@ class CloseAdministrativeTripCommand(Command):
 
 class CloseAdministrativeTripHandler(CommandHandler[CloseAdministrativeTripCommand, TripDTO]):
     """`commands/close-administrative` — exceção documentada (`002-VIAGEM.md`), nunca a via normal
-    de `FINALIZADA`. **Nunca** força `ENCERRADA` — a convergência continua exigindo Fiscal/
-    Financeiro reais (D019). Fecha o impedimento `VIAGEM` em `fleet` após o commit, mesmo padrão de
-    `finish_trip.py`."""
+    de `FINALIZADA`. **Nunca** força `viagens.encerrada` (a coluna `GENERATED`) — a convergência
+    continua exigindo Fiscal/Financeiro reais (D019). Fecha o impedimento `VIAGEM` em `fleet` após
+    o commit, mesmo padrão de `finish_trip.py`. V1 Operational Hardening, Parte 1 — encerra a
+    Alocação `VIGENTE` (se existir) na mesma transação (→ `AllocationStatus.ENCERRADA`, sem relação
+    com `viagens.encerrada` apesar do nome parecido), para que o Veículo volte a ser alocável."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -46,6 +51,7 @@ class CloseAdministrativeTripHandler(CommandHandler[CloseAdministrativeTripComma
         async with SQLAlchemyUnitOfWork() as uow:
             trip_repo = SqlAlchemyTripRepository(uow.session)
             history_repo = SqlAlchemyTripStatusHistoryRepository(uow.session)
+            allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
 
             trip = await trip_repo.get_by_id(command.trip_id)
             if trip is None:
@@ -53,6 +59,11 @@ class CloseAdministrativeTripHandler(CommandHandler[CloseAdministrativeTripComma
 
             trip.close_administrative()
             await trip_repo.add(trip)
+
+            current_allocation = await allocation_repo.get_current_for_trip(trip.id)
+            if current_allocation is not None:
+                current_allocation.end()
+                await allocation_repo.add(current_allocation)
 
             now = datetime.now(timezone.utc)
             await history_repo.add(

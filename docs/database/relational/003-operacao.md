@@ -188,7 +188,10 @@ CREATE INDEX idx_viagem_status_history_viagem_id_dimensao
 ## `alocacoes_recurso_viagem`
 
 ```sql
-CREATE TYPE alocacoes_recurso_viagem_status_enum AS ENUM ('VIGENTE', 'SUBSTITUIDA');
+CREATE TYPE alocacoes_recurso_viagem_status_enum AS ENUM ('VIGENTE', 'SUBSTITUIDA', 'ENCERRADA');
+    -- ENCERRADA reconciliado no V1 Operational Hardening, Parte 1 — a Viagem dona terminou
+    -- (Finalizada/Cancelada); distinto de SUBSTITUIDA (trocada por outra, Viagem ainda ativa).
+    -- Coluna física é String livre (sem tipo Postgres físico), sem migration necessária.
 
 CREATE TABLE alocacoes_recurso_viagem (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),

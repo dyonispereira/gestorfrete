@@ -6,3 +6,4 @@ from enum import StrEnum
 class AllocationStatus(StrEnum):
     VIGENTE = "VIGENTE"
     SUBSTITUIDA = "SUBSTITUIDA"
+    ENCERRADA = "ENCERRADA"

@@ -32,7 +32,15 @@ class TripAllocationsResult:
 
 class GetTripAllocationsHandler(QueryHandler[GetTripAllocationsQuery, TripAllocationsResult]):
     """`GET /viagens/{id}/resources` — sem `?history=true`, devolve só a `VIGENTE`; com, a coleção
-    completa (incluindo `SUBSTITUIDA`), `016-trip-resources.md`."""
+    completa (incluindo `SUBSTITUIDA`/`ENCERRADA`), `016-trip-resources.md`.
+
+    Reconciliado (V1 Operational Hardening, Parte 1): antes, `current is None` sempre levantava
+    `FREIGHT_TRIP_ALLOCATION_NOT_FOUND`, mesmo com `?history=true` — inofensivo enquanto a
+    Alocação `VIGENTE` nunca terminava (o bug que esta rodada corrige). Com `TripAllocation.end()`
+    em uso, uma Viagem `FINALIZADA`/`CANCELADA` passa a ter zero `VIGENTE` legitimamente; sem essa
+    ressalva, `?history=true` ficaria inacessível justamente para a Viagem cujo histórico faz mais
+    sentido consultar. `history=false` continua exigindo uma `VIGENTE` (não há "corrente" a mostrar
+    quando a Viagem já terminou ou nunca teve recursos)."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -45,12 +53,17 @@ class GetTripAllocationsHandler(QueryHandler[GetTripAllocationsQuery, TripAlloca
 
             allocation_repo = SqlAlchemyTripAllocationRepository(session)
             current = await allocation_repo.get_current_for_trip(query.trip_id)
-            if current is None:
+
+            if not query.history:
+                if current is None:
+                    raise NotFoundError("FREIGHT_TRIP_ALLOCATION_NOT_FOUND", "Viagem ainda não tem alocação vigente.")
+                return TripAllocationsResult(current=TripAllocationDTO.from_entity(current), items=[])
+
+            allocations = await allocation_repo.list_for_trip(query.trip_id, include_superseded=True)
+            if not allocations:
                 raise NotFoundError("FREIGHT_TRIP_ALLOCATION_NOT_FOUND", "Viagem ainda não tem alocação.")
 
-            items: list[TripAllocationDTO] = []
-            if query.history:
-                allocations = await allocation_repo.list_for_trip(query.trip_id, include_superseded=True)
-                items = [TripAllocationDTO.from_entity(a) for a in allocations]
-
-        return TripAllocationsResult(current=TripAllocationDTO.from_entity(current), items=items)
+        return TripAllocationsResult(
+            current=TripAllocationDTO.from_entity(current) if current is not None else None,
+            items=[TripAllocationDTO.from_entity(a) for a in allocations],
+        )

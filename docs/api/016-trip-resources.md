@@ -23,8 +23,8 @@ Retorna a alocação vigente (e, opcionalmente, o histórico de substituições)
 
 **Segurança**: `bearerAuth` + `freight.trip.view`.
 
-**Query parameters**: `?history=true` inclui alocações `SUBSTITUIDA`, não só a `VIGENTE` (default:
-só a vigente).
+**Query parameters**: `?history=true` inclui alocações `SUBSTITUIDA`/`ENCERRADA`, não só a
+`VIGENTE` (default: só a vigente).
 
 **Responses**
 
@@ -33,7 +33,7 @@ só a vigente).
 | `200` | `TripAllocation` (vigente) ou `Pagination` de `TripAllocation` quando `?history=true` |
 | `401` | `Unauthorized` |
 | `403` | `Forbidden` |
-| `404` | `NotFound` — Viagem não existe, ou nenhuma alocação ainda (Viagem em `RASCUNHO` sem recursos atribuídos) |
+| `404` | `NotFound` — Viagem não existe, ou nenhuma alocação existe para consultar (Viagem em `RASCUNHO` sem recursos ainda, **ou**, sem `?history=true`, nenhuma `VIGENTE` no momento — inclusive uma Viagem já `FINALIZADA`/`CANCELADA`, cuja Alocação virou `ENCERRADA`, Reconciliado Parte 1) |
 | `500` | `InternalServerError` |
 
 ## `POST /api/v1/viagens/{id}/resources`
@@ -108,6 +108,15 @@ nunca precisa de uma segunda chamada para saber o resultado.
 (Idempotency-Key), `422` — mesmos códigos de disponibilidade de `POST`, mais
 `FREIGHT_TRIP_NOT_ALLOCATABLE` (Viagem fora da janela `PLANEJADA`–`EM_ENTREGA`, ex.: já
 `FINALIZADA`/`CANCELADA`), `500`.
+
+## Ciclo de vida — encerramento da Viagem (Reconciliado, V1 Operational Hardening Parte 1)
+
+`commands/finish`, `commands/cancelar` e `commands/close-administrative` (`018-trip-status.md`)
+encerram a Alocação `VIGENTE` da Viagem (→ `ENCERRADA`) na mesma transação da transição de status.
+Isso é o que permite que `POST /resources` de uma Viagem nova aloque novamente o mesmo Veículo —
+`FREIGHT_VEHICLE_UNAVAILABLE` só dispara para Veículo com Alocação `VIGENTE` em Viagem ainda ativa.
+Gap fechado do Go-Live Audit: antes, essas três transições nunca tocavam a Alocação, que
+permanecia `VIGENTE` indefinidamente e bloqueava o Veículo para sempre.
 
 ## Composição Veicular — nota de escopo
 

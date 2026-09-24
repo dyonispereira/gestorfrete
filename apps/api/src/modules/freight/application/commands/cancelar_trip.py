@@ -11,6 +11,9 @@ from modules.fleet.application.availability_projector import VehicleAvailability
 from modules.freight.application.dtos.trip_dto import TripDTO
 from modules.freight.domain.entities.trip_status_history_entry import TripStatusHistoryEntry
 from modules.freight.domain.value_objects.status_history_dimension import StatusHistoryDimension
+from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_allocation_repository import (
+    SqlAlchemyTripAllocationRepository,
+)
 from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_repository import (
     SqlAlchemyTripRepository,
 )
@@ -33,7 +36,9 @@ class CancelarTripHandler(CommandHandler[CancelarTripCommand, TripDTO]):
     `EM_TRANSITO`/`EM_ENTREGA`/`CARREGANDO`/`EM_DESLOCAMENTO` (passa por `INTERROMPIDA` primeiro,
     `Trip.cancelar()` já reforça isso). Fecha o impedimento `VIAGEM` em `fleet` após o commit —
     idempotente/no-op na prática mais comum, já que a maioria das viagens canceláveis nunca chegou
-    a ser despachada (`apply_trip_dispatched` nunca abriu o impedimento)."""
+    a ser despachada (`apply_trip_dispatched` nunca abriu o impedimento). V1 Operational Hardening,
+    Parte 1 — encerra a Alocação `VIGENTE` (se existir) na mesma transação, para que o Veículo
+    volte a ser alocável em outra Viagem."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -45,6 +50,7 @@ class CancelarTripHandler(CommandHandler[CancelarTripCommand, TripDTO]):
         async with SQLAlchemyUnitOfWork() as uow:
             trip_repo = SqlAlchemyTripRepository(uow.session)
             history_repo = SqlAlchemyTripStatusHistoryRepository(uow.session)
+            allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
 
             trip = await trip_repo.get_by_id(command.trip_id)
             if trip is None:
@@ -52,6 +58,11 @@ class CancelarTripHandler(CommandHandler[CancelarTripCommand, TripDTO]):
 
             trip.cancelar()
             await trip_repo.add(trip)
+
+            current_allocation = await allocation_repo.get_current_for_trip(trip.id)
+            if current_allocation is not None:
+                current_allocation.end()
+                await allocation_repo.add(current_allocation)
 
             now = datetime.now(timezone.utc)
             await history_repo.add(

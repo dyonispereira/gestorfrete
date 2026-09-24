@@ -395,6 +395,27 @@ export interface UpdateCostCenterRequest {
   status?: CostCenterStatus;
 }
 
+/** V1 Operational Hardening, Parte 5 (D363) — `codigo` é gerado internamente, nunca informado. */
+export type VehicleCategoryStatus = "ATIVA" | "INATIVA";
+
+export interface VehicleCategory {
+  id: UUID;
+  codigo: string;
+  nome: string;
+  status: VehicleCategoryStatus;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface CreateVehicleCategoryRequest {
+  nome: string;
+}
+
+export interface UpdateVehicleCategoryRequest {
+  nome?: string;
+  status?: VehicleCategoryStatus;
+}
+
 /* ── Financeiro (Contas a Pagar/Receber, Faturas, Plano de Contas, Contas Bancárias, Estornos) ──
  * Sprint 15, Lote Financeiro, Parte 2. `FinancialReversal.created_by` — Reconciliado (Lote
  * Financeiro, Parte 2.1): resolvido via `logs_auditoria` (trilha transversal), não um campo novo
@@ -874,7 +895,7 @@ export type OccurrenceType = "ATRASO" | "AVARIA" | "PANE" | "SINISTRO" | "OUTRO"
 export type OccurrenceSeverity = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
 export type OccurrenceStatus = "ABERTA" | "RESOLVIDA";
 export type ProofOfDeliveryStatus = "PENDENTE" | "REGISTRADO";
-export type AllocationStatus = "VIGENTE" | "SUBSTITUIDA";
+export type AllocationStatus = "VIGENTE" | "SUBSTITUIDA" | "ENCERRADA";
 
 export interface TripReferences {
   client_id: UUID;
@@ -1039,6 +1060,47 @@ export interface UpdateOccurrenceRequest {
   description?: string;
   severity?: OccurrenceSeverity;
   status?: OccurrenceStatus;
+}
+
+/** V1 Operational Hardening, Parte 2 — `POST /coletas` closes `EM_DESLOCAMENTO → CARREGANDO`. */
+export interface Collection {
+  id: UUID;
+  trip_id: UUID;
+  registered_at: ISODateTime;
+  cargo_checked: boolean;
+  trip_operational_status: TripOperationalStatus;
+}
+
+export interface RegisterCollectionRequest {
+  cargo_checked?: boolean;
+}
+
+export interface CargoItem {
+  id: UUID;
+  description: string;
+  weight_kg: string;
+  quantity: number;
+}
+
+export interface CargoItemPayload {
+  description: string;
+  weight_kg: string;
+  quantity: number;
+}
+
+/** V1 Operational Hardening, Parte 2/3 — `POST /romaneios` closes `CARREGANDO → EM_TRANSITO`
+ * (or `EM_ENTREGA` in cascade, when there's already a `PENDENTE` Delivery). */
+export interface Manifest {
+  id: UUID;
+  trip_id: UUID;
+  document_number?: string;
+  items: CargoItem[];
+  trip_operational_status: TripOperationalStatus;
+}
+
+export interface ConfirmManifestRequest {
+  document_number?: string;
+  items: CargoItemPayload[];
 }
 
 /**

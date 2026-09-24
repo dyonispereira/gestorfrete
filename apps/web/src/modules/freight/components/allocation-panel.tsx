@@ -158,11 +158,15 @@ export function AllocationPanel({ tripId, canAllocate, canReassign }: Allocation
         ) : (
           <div className="flex flex-col gap-2 border-l-2 border-border pl-4">
             {(historyQuery.data?.data ?? [])
-              .filter((allocation) => allocation.status === "SUBSTITUIDA")
+              .filter((allocation) => allocation.status !== "VIGENTE")
               .map((allocation) => (
                 <div key={allocation.id} className="rounded-md border border-border p-3 text-sm">
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Substituída</Badge>
+                    {allocation.status === "SUBSTITUIDA" ? (
+                      <Badge variant="secondary">Substituída</Badge>
+                    ) : (
+                      <Badge variant="outline">Encerrada</Badge>
+                    )}
                     <span className="text-muted-foreground">{new Date(allocation.created_at).toLocaleString("pt-BR")}</span>
                   </div>
                   <p className="mt-1">

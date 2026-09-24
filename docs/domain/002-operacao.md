@@ -96,6 +96,9 @@ Ver [`ENTITY_CATALOG.md`](./ENTITY_CATALOG.md) para o índice completo desta cat
 - **Invariantes**: uma Coleta só ocorre com a Viagem em `EM_DESLOCAMENTO` ou `CARREGANDO`.
 - **Regras de negócio associadas**: D015/D016.
 - **Estados**: Não aplicável — marco pontual, sem ciclo de vida próprio.
+- **Reconciliado (V1 Operational Hardening, Parte 2)**: implementado — `POST /viagens/{id}/coletas`
+  fecha `EM_DESLOCAMENTO → CARREGANDO` usando `Trip.mark_collected()` (já existia, formalizado
+  antes só como simulação de teste). Uma Viagem tem no máximo uma Coleta neste V1.
 - **Auditoria**: D007.
 - **Linha do tempo**: parte da timeline da Viagem.
 - **Anexos suportados**: foto da carga na coleta (D024).
@@ -144,6 +147,10 @@ Ver [`ENTITY_CATALOG.md`](./ENTITY_CATALOG.md) para o índice completo desta cat
 - **Invariantes**: deve ter ao menos um Item de Carga.
 - **Regras de negócio associadas**: D015/D016.
 - **Estados**: Não aplicável.
+- **Reconciliado (V1 Operational Hardening, Parte 2/3)**: implementado — `POST /viagens/{id}/
+  romaneios` fecha `CARREGANDO → EM_TRANSITO` (com cascata para `EM_ENTREGA`) usando
+  `Trip.mark_manifest_checked()`, criando o Romaneio e todos os Itens de Carga na mesma transação
+  (invariante "ao menos um Item" reforçada em `Manifest.create()`, nunca deixada só para o banco).
 - **Auditoria**: D007.
 - **Linha do tempo**: parte da timeline da Viagem.
 - **Anexos suportados**: foto do romaneio físico, quando aplicável (D024).
@@ -356,11 +363,24 @@ Ver [`ENTITY_CATALOG.md`](./ENTITY_CATALOG.md) para o índice completo desta cat
   (referenciados por ID).
 - **Eventos que publica**: `ViagemReatribuida` (já catalogado).
 - **Eventos que consome**: Nenhum.
-- **Invariantes**: exatamente uma Alocação de Recurso `Vigente` por Viagem em cada instante (nunca
+- **Invariantes**: no máximo uma Alocação de Recurso `Vigente` por Viagem em cada instante (nunca
   duas simultâneas) — reforça o invariante oficial "uma Viagem deve possuir exatamente um Veículo
-  Tracionador ativo".
+  Tracionador ativo". Toda Viagem que já recebeu recursos tem exatamente uma `Vigente` enquanto
+  está operacionalmente ativa.
+- **Reconciliado (V1 Operational Hardening, Parte 1)**: quando a Viagem termina — `Finalizada`
+  (fluxo normal ou Encerramento Administrativo) ou `Cancelada`, por qualquer um dos três comandos
+  que produzem esses estados — a Alocação `Vigente` correspondente passa a `Encerrada` na mesma
+  transação da transição de status da Viagem (mesmo Aggregate, D188). Isso é distinto de
+  `Substituída`: `Substituída` significa "outra Alocação assumiu no lugar desta, na mesma Viagem
+  ainda ativa" (`commands/reallocate-resources`); `Encerrada` significa "a Viagem dona desta
+  Alocação acabou, não há substituta". Gap fechado: antes desta reconciliação, a Alocação
+  permanecia `Vigente` para sempre após o fim da Viagem, e `exists_vigente_for_vehicle_excluding_
+  trip` (a checagem de disponibilidade usada por `POST /resources`) continuava a enxergá-la como
+  bloqueio — o Veículo nunca podia ser alocado a uma nova Viagem. A correção é na origem (o ciclo
+  de vida da Alocação), não na consulta, que permanece inalterada.
 - **Regras de negócio associadas**: D017/D018 (histórico append-only de reatribuições).
-- **Estados**: `Vigente` / `Substituída`.
+- **Estados**: `Vigente` / `Substituída` (trocada por outra, mesma Viagem ainda ativa) / `Encerrada`
+  (a Viagem dona terminou — Finalizada ou Cancelada).
 - **Auditoria**: D007.
 - **Linha do tempo**: parte da timeline da Viagem.
 - **Anexos suportados**: Não aplicável.

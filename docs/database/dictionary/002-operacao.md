@@ -105,9 +105,17 @@ Dono: `freight` · Natureza: Transactional Data (marco pontual, sem ciclo de vid
 | Atributo | Nome | Tipo Conceitual | Obrigatório | Origem | Histórico | Classificação | Observações |
 |---|---|---|---|---|---|---|---|
 | COLETA.VIAGEM_ID | Viagem | Referência | Sim | Capturado (sistema) | Não | Interno | FK, imutável |
-| COLETA.DATA_HORA | Data/hora da coleta | Data/Hora | Sim | Capturado (app motorista) | Não | Interno | Granularidade: segundo (D074) |
-| COLETA.LOCAL | Local da coleta | Localização | Não | Capturado (GPS do app) | Não | Interno | Latitude/Longitude no momento do registro |
-| COLETA.CONFERENCIA_OK | Carga conferida | Booleano | Sim | Informado (app motorista) | Não | Interno | Condição de gatilho para `CARREGANDO → EM_TRANSITO` |
+| COLETA.DATA_HORA | Data/hora da coleta | Data/Hora | Sim | Capturado (sistema) | Não | Interno | Granularidade: segundo (D074) |
+| COLETA.LOCAL | Local da coleta | Localização | Não | Capturado (GPS do app) | Não | Interno | Latitude/Longitude no momento do registro — coluna física existe, ainda não populada (Reconciliado abaixo) |
+| COLETA.CONFERENCIA_OK | Carga conferida | Booleano | Sim | Informado | Não | Interno | Informativa — o gatilho de `EM_DESLOCAMENTO → CARREGANDO` é a própria criação da Coleta, não o valor deste campo (correção desta reconciliação: a nota anterior citava `CARREGANDO → EM_TRANSITO`, que na verdade depende do Romaneio, não da Coleta) |
+
+**Reconciliado (V1 Operational Hardening, Parte 2)**: `POST /viagens/{id}/coletas`
+(`018-trip-status.md`) implementa exatamente este contrato — `DATA_HORA` é sempre o instante do
+comando (`Capturado (sistema)`, não mais "app motorista" nesta rodada, que expõe só a web do
+Gestor); `LOCAL` (Geography) existe na tabela física mas segue sem captura de geolocalização —
+gap documentado, não implementado (depende de o app do Motorista existir e pedir permissão de
+GPS, fora de escopo desta rodada; `freight.pickup.create` já reserva `App: ●` no `RBAC_MATRIX`
+para quando isso acontecer).
 
 ## Ocorrência
 
@@ -130,6 +138,10 @@ Dono: `freight` · Natureza: Transactional Data · Parte do agregado Viagem.
 |---|---|---|---|---|---|---|---|
 | ROMANEIO.VIAGEM_ID | Viagem | Referência | Sim | Capturado (sistema) | Não | Interno | FK, imutável |
 | ROMANEIO.NUMERO_DOCUMENTO | Número do romaneio | Texto Curto | Não | Informado/Importado | Não | Interno | Não substitui o CT-e — ver [`../../flows/009-FISCAL.md`](../../flows/009-FISCAL.md) |
+
+**Reconciliado (V1 Operational Hardening, Parte 2/3)**: `POST /viagens/{id}/romaneios`
+(`018-trip-status.md`) implementa este contrato — confirmação do Romaneio (com ao menos um Item de
+Carga, invariante reforçada na criação) é o gatilho real de `CARREGANDO → EM_TRANSITO`/`EM_ENTREGA`.
 
 ## Item de Carga
 
@@ -234,7 +246,7 @@ Dono: `freight` · Natureza: Transactional Data · Parte do agregado Viagem.
 | ALOCACAO_RECURSO_VIAGEM.MOTORISTA_ID | Motorista | Referência | Sim | Informado (Gestor Operacional) | Sim (append-only, D017/D018) | Interno | Nunca sobrescrito — reatribuição gera novo registro |
 | ALOCACAO_RECURSO_VIAGEM.VEICULO_TRACIONADOR_ID | Veículo Tracionador | Referência | Sim | Informado | Sim | Interno | Idem acima |
 | ALOCACAO_RECURSO_VIAGEM.IMPLEMENTO_ID | Implemento | Referência | Não | Informado | Sim | Interno | Idem acima |
-| ALOCACAO_RECURSO_VIAGEM.STATUS | Status | Enum | Sim | Calculado | Sim | Interno | Valores: `Vigente`/`Substituída` — invariante: exatamente uma `Vigente` por Viagem em cada instante |
+| ALOCACAO_RECURSO_VIAGEM.STATUS | Status | Enum | Sim | Calculado | Sim | Interno | Valores: `Vigente`/`Substituída`/`Encerrada` (Reconciliado, V1 Operational Hardening Parte 1) — invariante: no máximo uma `Vigente` por Viagem em cada instante. `Substituída` = trocada por outra na mesma Viagem ainda ativa; `Encerrada` = a Viagem dona terminou (Finalizada/Cancelada) |
 | ALOCACAO_RECURSO_VIAGEM.MOTIVO_TROCA | Motivo da troca | Texto Longo | Não, obrigatório quando substitui uma alocação anterior | Informado | Não | Interno | Registrado como comentário na Timeline (D023) |
 
 ## Como este documento cresce

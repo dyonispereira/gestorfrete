@@ -68,3 +68,14 @@ class TripAllocation(BaseEntity[uuid.UUID]):
         if self.status != AllocationStatus.VIGENTE:
             raise DomainError("FREIGHT_TRIP_ALLOCATION_ALREADY_SUPERSEDED", "Alocação já não está vigente.")
         self.status = AllocationStatus.SUBSTITUIDA
+
+    def end(self) -> None:
+        """V1 Operational Hardening, Parte 1 — a Viagem dona terminou (`Finalizada`/`Cancelada`,
+        por qualquer um dos três comandos que produzem esses estados). Distinto de `supersede()`:
+        aqui não existe uma nova Alocação assumindo o lugar desta — o Veículo simplesmente para de
+        estar comprometido por esta Viagem. `exists_vigente_for_vehicle_excluding_trip` só enxerga
+        `VIGENTE`, então esta transição é o que libera o Veículo para uma nova Viagem."""
+
+        if self.status != AllocationStatus.VIGENTE:
+            raise DomainError("FREIGHT_TRIP_ALLOCATION_ALREADY_SUPERSEDED", "Alocação já não está vigente.")
+        self.status = AllocationStatus.ENCERRADA
