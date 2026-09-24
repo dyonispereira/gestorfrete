@@ -34,8 +34,8 @@ condicional). D238 — toda resposta de comando bem-sucedido devolve o `Trip` in
 | `PLANEJADA` | `AGUARDANDO_CHECKLIST` | **Derivada** | Automática, quando a Viagem está pronta para a data/rota programada — sem comando próprio, sem RBAC dedicado |
 | `AGUARDANDO_CHECKLIST` | `LIBERADA` | **Externa, fora de escopo** | Depende do fluxo de Checklist (`maintenance`, [`../flows/007-CHECKLIST.md`](../flows/007-CHECKLIST.md)) — **documento ainda não escrito**; sem endpoint de Checklist, esta transição não é alcançável via API neste lote |
 | `LIBERADA` | `EM_DESLOCAMENTO` | **Comando** | `commands/dispatch` (web, Gestor) **ou** `commands/start` (app, Motorista) — mesma transição, dois pontos de entrada |
-| `EM_DESLOCAMENTO` | `CARREGANDO` | **Externa, fora de escopo** | Depende de `POST` em Coleta (`coletas`, sem endpoint neste lote — `015-trip-deliveries.md`, seção "Fora de escopo") |
-| `CARREGANDO` | `EM_TRANSITO` | **Externa, fora de escopo** | Depende de Romaneio conferido (`romaneios`/`itens_carga`, sem endpoint neste lote) |
+| `EM_DESLOCAMENTO` | `CARREGANDO` | **Comando** | `POST /viagens/{id}/coletas` (Reconciliado, V1 Operational Hardening Parte 2 — fechava só simulado por `TripInternalTransitions.register_collection` até esta rodada) |
+| `CARREGANDO` | `EM_TRANSITO` | **Comando** | `POST /viagens/{id}/romaneios` (Reconciliado, V1 Operational Hardening Parte 2/3 — fechava só simulado por `TripInternalTransitions.confirm_manifest` até esta rodada) |
 | `EM_TRANSITO` | `EM_ENTREGA` | **Derivada** | Automática ao iniciar o atendimento da próxima Entrega `PENDENTE` (`015-trip-deliveries.md`) |
 | `EM_ENTREGA` | `EM_TRANSITO` | **Derivada** | Automática quando a Entrega da parada atual atinge estado terminal e ainda há Entregas `PENDENTE` (multi-drop) |
 | `EM_ENTREGA` | `FINALIZADA` | **Comando** | `commands/finish` — só quando a última Entrega atinge estado terminal (pré-condição verificada pelo comando, não automática) |
@@ -88,6 +88,43 @@ condicional). D238 — toda resposta de comando bem-sucedido devolve o `Trip` in
 | Evento publicado | `ViagemDespachada` *(mesmo evento de `dispatch` — mesma transição, origem diferente registrada em `viagem_status_history.origem = 'app_motorista'`)* |
 | Consumidores | Idem `dispatch` |
 | Erros possíveis | `401`, `403` (ator não é o Motorista alocado), `404`, `409` |
+
+### `POST /viagens/{id}/coletas`
+
+**Reconciliado (V1 Operational Hardening, Parte 2)** — sub-recurso, não `commands/<verbo>` (mesmo
+padrão de `POST /entregas`/`POST /occurrences`): a resposta é o `Collection` criado, não o `Trip`
+inteiro, mas inclui `trip_operational_status` (D238-style) para o Frontend nunca precisar de um
+segundo `GET` para saber o resultado.
+
+| Campo | Valor |
+|---|---|
+| Estado atual permitido | `EM_DESLOCAMENTO` |
+| Ação | Registra a Coleta da carga na origem |
+| Novo estado | `CARREGANDO` |
+| Permissão RBAC | `freight.pickup.create` (`App: ●` no `RBAC_MATRIX` — reservado para o app do Motorista, não implementado nesta rodada) |
+| Pré-condições | Nenhuma Coleta ainda registrada para esta Viagem |
+| Corpo | `{"cargo_checked": boolean}` (opcional, default `false`) — mapeia `coletas.conferencia_ok`, puramente informativo (não é o gatilho da transição, a própria criação da Coleta é) |
+| Evento publicado | `ColetaRealizada` (já catalogado em `EVENT_MAP.md`) |
+| Consumidores | Nenhum consumidor real ainda (mesma situação de todo evento deste backend) |
+| Erros possíveis | `401`, `403`, `404`, `409` — `FREIGHT_TRIP_INVALID_TRANSITION` (Viagem fora de `EM_DESLOCAMENTO`) **ou** `FREIGHT_COLLECTION_ALREADY_REGISTERED` (uma Viagem tem no máximo uma Coleta neste V1 — múltiplos pontos de coleta é evolução futura documentada, não implementada) |
+
+### `POST /viagens/{id}/romaneios`
+
+**Reconciliado (V1 Operational Hardening, Parte 2/3)** — mesmo padrão de sub-recurso de
+`POST /coletas` acima; resposta é o `Manifest` criado (com os Itens de Carga), incluindo
+`trip_operational_status`.
+
+| Campo | Valor |
+|---|---|
+| Estado atual permitido | `CARREGANDO` |
+| Ação | Confirma o Romaneio da carga (com seus Itens) |
+| Novo estado | `EM_TRANSITO`, **ou** `EM_ENTREGA` quando já há Entrega `PENDENTE` a atender (mesma cascata de `Trip.mark_manifest_checked()`, sem lógica nova) |
+| Permissão RBAC | `freight.packing_list.create` (só web/Gestor — sem `App: ●` no `RBAC_MATRIX`) |
+| Pré-condições | Nenhum Romaneio ainda registrado para esta Viagem; ao menos um Item de Carga no corpo (reforçado em `Manifest.create()`, D005/D006) |
+| Corpo | `{"document_number": string \| null, "items": [{"description": string, "weight_kg": decimal, "quantity": int}, ...]}` — `items` não pode ser vazio; `weight_kg`/`quantity` devem ser maiores que zero |
+| Evento publicado | Nenhum diretamente (mesmo status de `Romaneio` em `002-operacao.md`) |
+| Consumidores | — |
+| Erros possíveis | `401`, `403`, `404`, `409` — `FREIGHT_TRIP_INVALID_TRANSITION` (Viagem fora de `CARREGANDO`) **ou** `FREIGHT_MANIFEST_ALREADY_REGISTERED`; `422` — `FREIGHT_MANIFEST_REQUIRES_CARGO_ITEM` (`items` vazio), `FREIGHT_CARGO_ITEM_PESO_INVALIDO`/`FREIGHT_CARGO_ITEM_QUANTIDADE_INVALIDA` (valor ≤ 0) |
 
 ### `POST /viagens/{id}/commands/finish`
 
@@ -175,7 +212,7 @@ API. Não existe `POST /events`.
 
 ## Como este documento cresce
 
-`commands/retomar`'s evento sem nome próprio e as duas transições "Externa, fora de escopo"
-(Coleta/Romaneio) são as três lacunas mais visíveis deste lote — resolvidas quando os lotes
-correspondentes (Coleta/Romaneio, e um nome de evento formal para retomada) forem escritos, sempre
-Domain/EVENT_MAP primeiro (D101), API depois.
+As duas transições "Externa, fora de escopo" (Coleta/Romaneio) foram fechadas no V1 Operational
+Hardening, Parte 2/3 — ver `POST /coletas`/`POST /romaneios` acima. A lacuna restante deste
+documento é o evento sem nome próprio de `commands/retomar`, resolvida quando um nome formal for
+escrito, sempre Domain/EVENT_MAP primeiro (D101), API depois.

@@ -130,15 +130,15 @@ houver CT-e emitido) — fora do controle direto deste endpoint, consumido assin
 Idempotency-Key reusada, ou Canhoto já registrado para esta Entrega, `uq_canhotos_entrega_id`),
 `500`.
 
-## Fora de escopo deste lote (não esquecido)
+## Coleta/Romaneio — ver `018-trip-status.md`
 
-- **Coleta** (`coletas`) e **Romaneio**/**Item de Carga** (`romaneios`/`itens_carga`) — tabelas
-  físicas existentes, sem endpoint próprio ainda. São o gatilho real de duas transições de Status
-  Operacional (`EM_DESLOCAMENTO → CARREGANDO`, `CARREGANDO → EM_TRANSITO`, ver
-  [`018-trip-status.md`](./018-trip-status.md)) — até esses endpoints existirem, essas duas
-  transições não são alcançáveis via API, só documentadas na máquina de estados.
+**Reconciliado (V1 Operational Hardening, Parte 2/3)**: `POST /viagens/{id}/coletas` e
+`POST /viagens/{id}/romaneios` — o gatilho real de `EM_DESLOCAMENTO → CARREGANDO` e
+`CARREGANDO → EM_TRANSITO` — foram implementados, mesmo padrão de sub-recurso de Viagem já
+estabelecido aqui para Entregas/Canhoto. Documentados por completo em
+[`018-trip-status.md`](./018-trip-status.md) (junto da tabela de transições que eles fecham), não
+repetidos aqui.
 
 ## Como este documento cresce
 
-Endpoints de Coleta/Romaneio entram num lote futuro, mesmo padrão de sub-recurso de Viagem já
-estabelecido aqui.
+Nenhuma lacuna conhecida no momento desta reconciliação.

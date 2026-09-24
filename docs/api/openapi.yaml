@@ -2798,6 +2798,73 @@ paths:
         "500": { $ref: "#/components/responses/InternalServerError" }
 
   # ---------------------------------------------------------------------------
+  # Trip Collection/Manifest — 018-trip-status.md (V1 Operational Hardening, Parte 2/3)
+  # ---------------------------------------------------------------------------
+  /viagens/{id}/coletas:
+    post:
+      tags: [TripCollection]
+      summary: Registra a Coleta e fecha EM_DESLOCAMENTO → CARREGANDO
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cargo_checked: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Coleta registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Collection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /viagens/{id}/romaneios:
+    post:
+      tags: [TripManifest]
+      summary: Confirma o Romaneio e fecha CARREGANDO → EM_TRANSITO (ou EM_ENTREGA, em cascata)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_number: { type: string, nullable: true }
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    properties:
+                      description: { type: string }
+                      weight_kg: { type: string, format: decimal }
+                      quantity: { type: integer, minimum: 1 }
+                    required: [description, weight_kg, quantity]
+              required: [items]
+      responses:
+        "201":
+          description: Romaneio confirmado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  # ---------------------------------------------------------------------------
   # Trip Timeline — 019-trip-timeline.md
   # ---------------------------------------------------------------------------
   /viagens/{id}/timeline:
@@ -4269,6 +4336,8 @@ paths:
     post:
       tags: [AccountsPayable]
       summary: Lança uma conta a pagar
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       requestBody:
         required: true
         content:
@@ -4417,6 +4486,7 @@ paths:
       summary: "APROVADA → PAGA"
       parameters:
         - $ref: "#/components/parameters/IdPathParam"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       requestBody:
         required: true
         content:
@@ -4533,6 +4603,8 @@ paths:
         `total_value = gross_value + adjustment_value`. Todas as validações (elegibilidade,
         mesmo cliente, duplicata na seleção, Viagem já faturada) rodam antes de qualquer escrita —
         falha na criação não deixa metade das Viagens faturadas.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       requestBody:
         required: true
         content:
@@ -4813,6 +4885,7 @@ paths:
           in: path
           required: true
           schema: { $ref: "#/components/schemas/UUID" }
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       requestBody:
         required: true
         content:
@@ -5653,6 +5726,7 @@ paths:
       summary: "ASSINADO → TRANSMITIDO"
       parameters:
         - $ref: "#/components/parameters/IdPathParam"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       responses:
         "200":
           description: CT-e transmitido
@@ -10968,10 +11042,52 @@ components:
         driver_id: { $ref: "#/components/schemas/UUID" }
         tractor_unit_id: { $ref: "#/components/schemas/UUID" }
         implement_id: { $ref: "#/components/schemas/UUID" }
-        status: { type: string, enum: [VIGENTE, SUBSTITUIDA], readOnly: true }
+        status: { type: string, enum: [VIGENTE, SUBSTITUIDA, ENCERRADA], readOnly: true }
         replacement_reason: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
       required: [id, driver_id, tractor_unit_id, status, created_at]
+
+    Collection:
+      type: object
+      description: >-
+        V1 Operational Hardening, Parte 2 — `POST /viagens/{id}/coletas`.
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        trip_id: { $ref: "#/components/schemas/UUID" }
+        registered_at: { type: string, format: date-time, readOnly: true }
+        cargo_checked: { type: boolean }
+        trip_operational_status:
+          type: string
+          enum: [RASCUNHO, PLANEJADA, AGUARDANDO_CHECKLIST, LIBERADA, EM_DESLOCAMENTO, CARREGANDO, EM_TRANSITO, EM_ENTREGA, FINALIZADA, INTERROMPIDA, CANCELADA]
+          readOnly: true
+      required: [id, trip_id, registered_at, cargo_checked, trip_operational_status]
+
+    CargoItem:
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        description: { type: string }
+        weight_kg: { type: string, format: decimal }
+        quantity: { type: integer, minimum: 1 }
+      required: [id, description, weight_kg, quantity]
+
+    Manifest:
+      type: object
+      description: >-
+        V1 Operational Hardening, Parte 2/3 — `POST /viagens/{id}/romaneios`.
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        trip_id: { $ref: "#/components/schemas/UUID" }
+        document_number: { type: string, nullable: true }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/CargoItem" }
+        trip_operational_status:
+          type: string
+          enum: [RASCUNHO, PLANEJADA, AGUARDANDO_CHECKLIST, LIBERADA, EM_DESLOCAMENTO, CARREGANDO, EM_TRANSITO, EM_ENTREGA, FINALIZADA, INTERROMPIDA, CANCELADA]
+          readOnly: true
+      required: [id, trip_id, items, trip_operational_status]
 
     Delivery:
       type: object

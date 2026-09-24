@@ -30,7 +30,10 @@ from modules.financial.interfaces.api.financial_reversal_router import router as
 from modules.financial.interfaces.api.invoice_router import router as invoice_router
 from modules.financial.interfaces.api.payment_method_router import router as payment_method_router
 from modules.fleet.interfaces.api.implement_router import router as implement_router
+from modules.fleet.interfaces.api.vehicle_category_router import router as vehicle_category_router
+from modules.freight.interfaces.api.collection_router import router as collection_router
 from modules.freight.interfaces.api.delivery_router import router as delivery_router
+from modules.freight.interfaces.api.manifest_router import router as manifest_router
 from modules.freight.interfaces.api.occurrence_router import router as occurrence_router
 from modules.freight.interfaces.api.timeline_router import router as timeline_router
 from modules.freight.interfaces.api.trip_attachment_router import router as trip_attachment_router
@@ -103,6 +106,7 @@ api_router_v1.include_router(cost_center_router)
 # "disponibilidade" como se fosse um UUID — mesmo cuidado de `/drivers/me`, Lote 3.
 api_router_v1.include_router(vehicle_availability_router)
 api_router_v1.include_router(vehicle_router)
+api_router_v1.include_router(vehicle_category_router)
 api_router_v1.include_router(implement_router)
 api_router_v1.include_router(vehicle_composition_router)
 api_router_v1.include_router(odometer_reading_router)
@@ -115,6 +119,8 @@ api_router_v1.include_router(odometer_reading_router)
 api_router_v1.include_router(trip_router)
 api_router_v1.include_router(delivery_router)
 api_router_v1.include_router(occurrence_router)
+api_router_v1.include_router(collection_router)
+api_router_v1.include_router(manifest_router)
 api_router_v1.include_router(timeline_router)
 
 # Sprint 11, Lote 6 — Financeiro (D384-D394). `trip_financials_router` mora em `freight` (D389:

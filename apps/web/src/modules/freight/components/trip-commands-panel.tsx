@@ -2,10 +2,12 @@
 
 import * as React from "react";
 
-import { Button, Input, Label, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea, toast } from "@gestorfrete/ui";
-import type { Trip, TripOperationalStatus } from "@gestorfrete/types";
+import { Button, Checkbox, Input, Label, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea, toast } from "@gestorfrete/ui";
+import type { CargoItemPayload, Trip, TripOperationalStatus } from "@gestorfrete/types";
 
 import { usePermissions } from "@/core/rbac/permissions-provider";
+import { useRegisterCollectionMutation } from "@/modules/freight/hooks/use-collection";
+import { useConfirmManifestMutation } from "@/modules/freight/hooks/use-manifest";
 import {
   useAcceptTripMutation,
   useCancelarTripMutation,
@@ -25,34 +27,42 @@ const TERMINAL: TripOperationalStatus[] = ["FINALIZADA", "CANCELADA"];
 type CommandKey = "accept" | "dispatch" | "start" | "finish" | "interromper" | "retomar" | "cancelar" | "close-administrative";
 type DialogCommandKey = "interromper" | "cancelar" | "close-administrative";
 
+const EMPTY_CARGO_ITEM: CargoItemPayload = { description: "", weight_kg: "", quantity: 1 };
+
 /**
  * Só renderiza o(s) comando(s) válido(s) para o `status.operational` atual — nunca um botão para
  * uma transição inválida (`docs/flows/002-VIAGEM.md`). Status nunca muda por PATCH: cada botão é
  * um `POST .../commands/<verbo>` (D233). `encerrada` é derivada pelo Postgres e nunca tem botão —
  * não aparece aqui em nenhuma hipótese, nem para Admin SaaS (D019/D020).
  *
- * Nota (auditoria deste Lote): `AGUARDANDO_CHECKLIST→LIBERADA`, `EM_DESLOCAMENTO→CARREGANDO` e
- * `CARREGANDO→EM_TRANSITO` não têm nenhum endpoint HTTP — dependem de módulos futuros (Checklist,
- * Coleta, Romaneio) ainda não implementados. Isso significa que, hoje, uma Viagem criada por esta
- * UI nunca alcança `LIBERADA`/`EM_ENTREGA` de verdade — Despachar/Iniciar/Finalizar/Interromper só
- * ficam clicáveis quando o estado correspondente existir (o que, na prática, ainda não acontece
- * neste ambiente). O componente é construído para a máquina de estados completa mesmo assim, para
- * não precisar ser reescrito quando esses módulos existirem.
+ * Nota (auditoria do Go-Live Audit, fechada no V1 Operational Hardening Parte 2/3): `EM_DESLOCAMENTO
+ * →CARREGANDO` e `CARREGANDO→EM_TRANSITO` (Coleta/Romaneio) já têm endpoint HTTP real, abaixo.
+ * `AGUARDANDO_CHECKLIST→LIBERADA` não aparece neste componente — é acionada pelo `ChecklistPanel`
+ * (aprovação/reprovação de Checklist, módulo próprio), nunca duplicada aqui.
  *
  * V1 Operational Hardening, Parte 2 — Despachar/Iniciar ganham um campo opcional de hodômetro de
  * saída ao lado do botão, Finalizar um de hodômetro de chegada — inline, nunca atrás de um diálogo
  * extra: continua sendo um único clique para quem não usa hodômetro (D-consistente com todo botão
  * "simples" já existente aqui), o campo só é lido se estiver preenchido. Grava a leitura de
  * fronteira em `leituras_hodometro` (`fleet`), nunca uma segunda fonte da verdade.
+ *
+ * V1 Operational Hardening, Parte 2/3 — `EM_DESLOCAMENTO` ganha "Registrar coleta" (um clique +
+ * checkbox opcional "carga conferida", mesmo padrão inline do hodômetro); `CARREGANDO` ganha
+ * "Confirmar romaneio", que abre o Sheet (precisa de ao menos um Item de Carga — não cabe num
+ * campo inline). Nenhuma regra nova aqui: os dois comandos só chamam `POST /coletas`/
+ * `POST /romaneios`, cuja validação vive inteiramente no backend (`018-trip-status.md`).
  */
 export function TripCommandsPanel({ trip }: { trip: Trip }) {
   const { hasPermission } = usePermissions();
   const status = trip.status.operational;
 
-  const [openDialog, setOpenDialog] = React.useState<DialogCommandKey | null>(null);
+  const [openDialog, setOpenDialog] = React.useState<DialogCommandKey | "confirm-manifest" | null>(null);
   const [text, setText] = React.useState("");
   const [departureOdometerKm, setDepartureOdometerKm] = React.useState("");
   const [arrivalOdometerKm, setArrivalOdometerKm] = React.useState("");
+  const [cargoChecked, setCargoChecked] = React.useState(false);
+  const [documentNumber, setDocumentNumber] = React.useState("");
+  const [cargoItems, setCargoItems] = React.useState<CargoItemPayload[]>([{ ...EMPTY_CARGO_ITEM }]);
 
   const accept = useAcceptTripMutation();
   const dispatch = useDispatchTripMutation();
@@ -62,6 +72,8 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
   const retomar = useRetomarTripMutation();
   const cancelar = useCancelarTripMutation();
   const closeAdministrative = useCloseAdministrativeTripMutation();
+  const registerCollection = useRegisterCollectionMutation(trip.id);
+  const confirmManifest = useConfirmManifestMutation(trip.id);
 
   async function runSimple(
     key: CommandKey,
@@ -101,6 +113,35 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
     }
   }
 
+  async function runRegisterCollection() {
+    try {
+      await registerCollection.mutateAsync({ cargo_checked: cargoChecked });
+      toast.success("Coleta registrada.");
+      setCargoChecked(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Não foi possível registrar a coleta.");
+    }
+  }
+
+  async function runConfirmManifest() {
+    try {
+      await confirmManifest.mutateAsync({
+        document_number: documentNumber || undefined,
+        items: cargoItems.filter((item) => item.description.trim() && item.weight_kg && item.quantity > 0),
+      });
+      toast.success("Romaneio confirmado.");
+      setOpenDialog(null);
+      setDocumentNumber("");
+      setCargoItems([{ ...EMPTY_CARGO_ITEM }]);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Não foi possível confirmar o romaneio.");
+    }
+  }
+
+  function updateCargoItem(index: number, patch: Partial<CargoItemPayload>) {
+    setCargoItems((items) => items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }
+
   async function runWithText(key: DialogCommandKey) {
     try {
       if (key === "interromper") await interromper.mutateAsync({ tripId: trip.id, variables: { notes: text } });
@@ -116,7 +157,7 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
   }
 
   const buttons: React.ReactNode[] = [];
-  let odometerField: React.ReactNode = null;
+  let extraField: React.ReactNode = null;
 
   if (status === "PLANEJADA" && hasPermission("freight.trip.edit")) {
     buttons.push(
@@ -126,7 +167,7 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
     );
   }
   if (status === "LIBERADA" && (hasPermission("freight.trip.dispatch") || hasPermission("freight.trip.start"))) {
-    odometerField = (
+    extraField = (
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="trip-departure-odometer-km">Hodômetro de saída (opcional)</Label>
         <Input
@@ -150,8 +191,32 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
       </Button>
     );
   }
+  if (status === "EM_DESLOCAMENTO" && hasPermission("freight.pickup.create")) {
+    extraField = (
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="trip-collection-cargo-checked"
+          checked={cargoChecked}
+          onCheckedChange={(checked) => setCargoChecked(checked === true)}
+        />
+        <Label htmlFor="trip-collection-cargo-checked">Carga conferida</Label>
+      </div>
+    );
+    buttons.push(
+      <Button key="collect" onClick={() => runRegisterCollection()}>
+        Registrar coleta
+      </Button>
+    );
+  }
+  if (status === "CARREGANDO" && hasPermission("freight.packing_list.create")) {
+    buttons.push(
+      <Button key="confirm-manifest" onClick={() => setOpenDialog("confirm-manifest")}>
+        Confirmar romaneio
+      </Button>
+    );
+  }
   if (status === "EM_ENTREGA" && hasPermission("freight.trip.finish")) {
-    odometerField = (
+    extraField = (
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="trip-arrival-odometer-km">Hodômetro de chegada (opcional)</Label>
         <Input
@@ -218,12 +283,85 @@ export function TripCommandsPanel({ trip }: { trip: Trip }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {odometerField}
+      {extraField}
       {buttons.length > 0 ? <div className="flex flex-wrap gap-2">{buttons}</div> : null}
 
       <Sheet open={openDialog !== null} onOpenChange={(open) => !open && setOpenDialog(null)}>
         <SheetContent className="flex flex-col gap-6 overflow-y-auto sm:max-w-md">
-          {openDialog ? (
+          {openDialog === "confirm-manifest" ? (
+            <>
+              <SheetHeader>
+                <SheetTitle>Confirmar romaneio</SheetTitle>
+                <SheetDescription>Registre ao menos um Item de Carga — obrigatório.</SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-1 flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="manifest-document-number">Número do romaneio (opcional)</Label>
+                  <Input
+                    id="manifest-document-number" value={documentNumber}
+                    onChange={(event) => setDocumentNumber(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-3">
+                  {cargoItems.map((item, index) => (
+                    <div key={index} className="flex flex-col gap-2 rounded-md border border-border p-3">
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`manifest-item-description-${index}`}>Descrição</Label>
+                        <Input
+                          id={`manifest-item-description-${index}`} value={item.description}
+                          onChange={(event) => updateCargoItem(index, { description: event.target.value })}
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex flex-1 flex-col gap-1.5">
+                          <Label htmlFor={`manifest-item-weight-${index}`}>Peso (kg)</Label>
+                          <Input
+                            id={`manifest-item-weight-${index}`} type="number" step="0.01" value={item.weight_kg}
+                            onChange={(event) => updateCargoItem(index, { weight_kg: event.target.value })}
+                          />
+                        </div>
+                        <div className="flex flex-1 flex-col gap-1.5">
+                          <Label htmlFor={`manifest-item-quantity-${index}`}>Quantidade</Label>
+                          <Input
+                            id={`manifest-item-quantity-${index}`} type="number" step="1" value={item.quantity}
+                            onChange={(event) => updateCargoItem(index, { quantity: Number(event.target.value) || 0 })}
+                          />
+                        </div>
+                      </div>
+                      {cargoItems.length > 1 ? (
+                        <Button
+                          type="button" variant="outline" size="sm" className="self-start"
+                          onClick={() => setCargoItems((items) => items.filter((_, i) => i !== index))}
+                        >
+                          Remover item
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <Button
+                    type="button" variant="outline" size="sm" className="self-start"
+                    onClick={() => setCargoItems((items) => [...items, { ...EMPTY_CARGO_ITEM }])}
+                  >
+                    Adicionar item
+                  </Button>
+                </div>
+                <div className="mt-auto flex justify-end gap-2 pt-4">
+                  <Button type="button" variant="outline" onClick={() => setOpenDialog(null)}>
+                    Voltar
+                  </Button>
+                  <Button
+                    disabled={
+                      confirmManifest.isPending ||
+                      !cargoItems.some((item) => item.description.trim() && item.weight_kg && item.quantity > 0)
+                    }
+                    onClick={() => runConfirmManifest()}
+                  >
+                    Confirmar romaneio
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : openDialog ? (
             <>
               <SheetHeader>
                 <SheetTitle>{dialogCopy[openDialog].title}</SheetTitle>
