@@ -395,6 +395,8 @@ Infraestrutura técnica comum a todo bounded context — nenhuma regra de negóc
 | [`ERROR_HANDLING.md`](./ERROR_HANDLING.md) | 8 classes de exceção (7 pedidas + `AuthenticationError`, achado contra `ERROR_MODEL.md`), 3 handlers FastAPI, envelope idêntico ao contrato |
 | [`OBSERVABILITY.md`](./OBSERVABILITY.md) | Logging JSON estruturado, `request_id`/`correlation_id`, os 3 health checks |
 | [`TESTING_STRATEGY.md`](./TESTING_STRATEGY.md) | **O que foi executado de verdade** — ruff/mypy/import-linter/pytest, os 2 bugs reais encontrados e corrigidos, o que fica pendente sem Docker |
+| [`BACKUP_RESTORE.md`](./BACKUP_RESTORE.md) | `pg_dump` automatizado, retenção, procedimento e teste real de restore (V1 Operational Hardening, gap P0 do Go-Live Audit) |
+| [`CI_PIPELINE.md`](./CI_PIPELINE.md) | Barreira mínima de CI — ruff/mypy/import-linter/pytest/typecheck/lint/Playwright antes de qualquer merge (V1 Operational Hardening, gap P0 do Go-Live Audit) |
 
 ## Decisões
 

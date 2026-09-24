@@ -1,0 +1,39 @@
+# V1 Operational Hardening — INFRA. Sem este arquivo, `docker build`/`docker compose build`
+# envia o monorepo inteiro (node_modules de 6 workspaces, .git, .next, caches Python) como
+# contexto — 1GB+, centenas de milhares de arquivos, minutos perdidos por build só na fase
+# "Sending build context to Docker daemon", antes de qualquer Step rodar. `infra/docker/api/
+# Dockerfile` só precisa de `apps/api/`; nenhum destes diretórios é necessário em nenhum build.
+
+# Node / pnpm / Turborepo
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Python / Poetry
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Playwright / e2e
+apps/web/e2e/test-results/
+apps/web/playwright-report/
+
+# Env files (nunca vão para dentro da imagem — variáveis reais vêm de `environment:`/secret manager)
+.env
+.env.local
+.env.*.local
+infra/compose/.env
+
+# Git / editores / OS
+.git/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
