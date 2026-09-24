@@ -447,7 +447,6 @@ def upgrade() -> None:
     # NOTHING no código estável (`codigo`), nunca no `id`, torna a migration idempotente mesmo que
     # já existam linhas (ex.: inseridas manualmente por uma suíte de teste rodada antes deste seed
     # existir).
-    now = sa.text("now()")
     insert_stmt = postgresql.insert(permissoes_table)
     for row in PERMISSOES:
         op.execute(
