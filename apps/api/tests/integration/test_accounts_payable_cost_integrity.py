@@ -170,9 +170,11 @@ async def tenants() -> AsyncIterator[list[uuid.UUID]]:
 @pytest.fixture(autouse=True)
 async def _fresh_engine_per_test() -> AsyncIterator[None]:
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture

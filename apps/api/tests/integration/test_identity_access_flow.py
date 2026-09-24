@@ -176,12 +176,16 @@ async def _fresh_engine_per_test() -> AsyncIterator[None]:
     """``core.database.session.get_engine`` is process-wide ``lru_cache``d, but pytest-asyncio
     hands each test function its own event loop — a pooled asyncpg connection created under one
     test's loop crashes if reused under the next test's (now-closed) loop. Disposing after every
-    test forces the next one to lazily build a brand-new pool bound to its own loop."""
+    test forces the next one to lazily build a brand-new pool bound to its own loop. Same
+    reasoning applies to the Redis client (V1 Operational Hardening, Parte 6) — see
+    ``reset_redis_client``."""
 
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture

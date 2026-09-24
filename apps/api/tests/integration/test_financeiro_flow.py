@@ -360,9 +360,11 @@ async def tenants() -> AsyncIterator[list[uuid.UUID]]:
 @pytest.fixture(autouse=True)
 async def _fresh_engine_per_test() -> AsyncIterator[None]:
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture
@@ -634,6 +636,82 @@ class TestBankAccountFlow:
         assert after.status_code == 404
 
 
+class TestAccountsPayableIdempotency:
+    """V1 Operational Hardening, Parte 6 (D211) — prioridade 3 da lista, os dois lados (lançamento
+    e baixa) do mesmo mecanismo Redis-backed."""
+
+    async def test_same_key_and_payload_never_creates_a_second_payable(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        supplier_id = await _create_supplier(client, headers)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+        idempotency_key = str(uuid.uuid4())
+        payload = {
+            "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
+            "value": "500.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01",
+            "chart_of_accounts_id": chart_id,
+        }
+
+        first = await client.post(
+            "/api/v1/contas-pagar", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert first.status_code == 201, first.text
+        payable_id = first.json()["id"]
+
+        second = await client.post(
+            "/api/v1/contas-pagar", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["id"] == payable_id  # mesma Conta a Pagar, nunca uma segunda
+
+    async def test_same_key_and_payload_never_pays_a_payable_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        supplier_id = await _create_supplier(client, headers)
+        cost_center_id = await _create_cost_center(client, headers)
+        chart_id = await _create_chart_of_accounts(client, headers)
+        bank_account_id = await _create_bank_account(client, headers)
+
+        create = await client.post(
+            "/api/v1/contas-pagar", headers=headers,
+            json={
+                "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
+                "value": "500.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01",
+                "chart_of_accounts_id": chart_id,
+            },
+        )
+        payable_id = create.json()["id"]
+        assert create.json()["status"] == "APROVADA"
+
+        idempotency_key = str(uuid.uuid4())
+        payload = {"bank_account_id": bank_account_id}
+
+        first_pay = await client.post(
+            f"/api/v1/contas-pagar/{payable_id}/commands/pay",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert first_pay.status_code == 200, first_pay.text
+        assert first_pay.json()["status"] == "PAGA"
+
+        second_pay = await client.post(
+            f"/api/v1/contas-pagar/{payable_id}/commands/pay",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert second_pay.status_code == 200, second_pay.text
+        assert second_pay.json()["status"] == "PAGA"  # replay — não é FINANCIAL_PAYABLE_INVALID_TRANSITION
+
+        # Sem a chave, o retry bateria no guard normal de estado (já PAGA) — confirma que o replay
+        # acima veio do cache de idempotência, não de `pay` aceitar `PAGA → PAGA` como transição.
+        without_key = await client.post(
+            f"/api/v1/contas-pagar/{payable_id}/commands/pay", headers=headers, json=payload
+        )
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "FINANCIAL_PAYABLE_INVALID_TRANSITION"
+
+
 class TestAccountsPayableFlow:
     async def test_alcada_auto_routes_lancada_to_aprovada_when_under_threshold(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
@@ -768,6 +846,39 @@ class TestAccountsPayableFlow:
         blocked = await client.delete(f"/api/v1/contas-pagar/{payable_id}", headers=headers)
         assert blocked.status_code == 409
         assert blocked.json()["error"]["code"] == "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS"
+
+
+class TestInvoiceCreationIdempotency:
+    """V1 Operational Hardening, Parte 6 (D211) — prioridade 2 da lista: `POST /faturas` real,
+    mesmo mecanismo Redis-backed de `TestTripCreationIdempotency` (`test_operacao_flow.py`)."""
+
+    async def test_same_key_and_payload_never_creates_a_second_invoice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        trip_id, _ = await _prepare_invoiceable_trip(client, headers, tenant_id, category_id)
+        client_id_resp = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        client_id = client_id_resp.json()["references"]["client_id"]
+
+        idempotency_key = str(uuid.uuid4())
+        payload = {
+            "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+            "payment_method_id": str(payment_method_id),
+            "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+        }
+
+        first = await client.post(
+            "/api/v1/faturas", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert first.status_code == 201, first.text
+        invoice_id = first.json()["id"]
+
+        second = await client.post(
+            "/api/v1/faturas", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["id"] == invoice_id  # mesma Fatura, nunca uma segunda
 
 
 class TestInvoiceAndReceivableFlow:

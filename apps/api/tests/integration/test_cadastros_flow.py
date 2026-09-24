@@ -214,12 +214,15 @@ async def tenants() -> AsyncIterator[list[uuid.UUID]]:
 async def _fresh_engine_per_test() -> AsyncIterator[None]:
     """See `test_identity_access_flow.py` — pytest-asyncio gives each test its own event loop, but
     `get_engine()` is process-wide `lru_cache`d; disposing after every test avoids a pooled
-    connection from one test's loop crashing the next test."""
+    connection from one test's loop crashing the next test. Same reasoning applies to the Redis
+    client (V1 Operational Hardening, Parte 6, `core/idempotency/`) — see `reset_redis_client`."""
 
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture

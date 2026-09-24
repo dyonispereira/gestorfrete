@@ -18,12 +18,15 @@ from modules.documents.infrastructure.persistence.models.fiscal_configuration_mo
 from modules.drivers.infrastructure.persistence.models.driver_model import DriverModel
 from modules.fleet.infrastructure.persistence.models.vehicle_availability_model import VehicleAvailabilityModel
 from modules.fleet.infrastructure.persistence.models.vehicle_category_model import VehicleCategoryModel
+from modules.fleet.infrastructure.persistence.models.odometer_reading_model import OdometerReadingModel
 from modules.fleet.infrastructure.persistence.models.vehicle_impediment_model import VehicleImpedimentModel
 from modules.fleet.infrastructure.persistence.models.vehicle_model import VehicleModel
 from modules.freight.application.trip_internal_transitions import TripInternalTransitions
 from modules.freight.domain.value_objects.trip_financial_status import TripFinancialStatus
 from modules.freight.domain.value_objects.trip_fiscal_status import TripFiscalStatus
+from modules.freight.infrastructure.persistence.models.collection_model import CollectionModel
 from modules.freight.infrastructure.persistence.models.delivery_model import DeliveryModel, DeliveryWindowModel
+from modules.freight.infrastructure.persistence.models.manifest_model import CargoItemModel, ManifestModel
 from modules.freight.infrastructure.persistence.models.occurrence_model import OccurrenceModel
 from modules.freight.infrastructure.persistence.models.proof_of_delivery_model import ProofOfDeliveryModel
 from modules.freight.infrastructure.persistence.models.trip_allocation_model import TripAllocationModel
@@ -70,6 +73,8 @@ PERMISSION_CATALOG = [
     ("freight.occurrence.create", "Criar ocorrências", "freight"),
     ("freight.occurrence.edit", "Editar ocorrências", "freight"),
     ("freight.pod.create", "Registrar canhoto", "freight"),
+    ("freight.pickup.create", "Registrar coleta", "freight"),
+    ("freight.packing_list.create", "Criar romaneio", "freight"),
     ("crm.client.create", "Criar clientes", "crm"),
     ("crm.client.edit", "Editar clientes", "crm"),
     ("drivers.driver.create", "Criar motoristas", "drivers"),
@@ -207,6 +212,9 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
             await session.execute(delete(ProofOfDeliveryModel).where(ProofOfDeliveryModel.entrega_id.in_(entrega_ids)))
             await session.execute(delete(DeliveryWindowModel).where(DeliveryWindowModel.entrega_id.in_(entrega_ids)))
         await session.execute(delete(OccurrenceModel).where(OccurrenceModel.tenant_id == tenant_id))
+        await session.execute(delete(CargoItemModel).where(CargoItemModel.tenant_id == tenant_id))
+        await session.execute(delete(ManifestModel).where(ManifestModel.tenant_id == tenant_id))
+        await session.execute(delete(CollectionModel).where(CollectionModel.tenant_id == tenant_id))
         await session.execute(delete(DeliveryModel).where(DeliveryModel.tenant_id == tenant_id))
         await session.execute(delete(TripAllocationModel).where(TripAllocationModel.tenant_id == tenant_id))
         await session.execute(delete(TripStatusHistoryModel).where(TripStatusHistoryModel.tenant_id == tenant_id))
@@ -218,6 +226,7 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         await session.execute(delete(TripModel).where(TripModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
+        await session.execute(delete(OdometerReadingModel).where(OdometerReadingModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleModel).where(VehicleModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleCategoryModel).where(VehicleCategoryModel.tenant_id == tenant_id))
         await session.execute(delete(DriverModel).where(DriverModel.tenant_id == tenant_id))
@@ -244,9 +253,11 @@ async def tenants() -> AsyncIterator[list[uuid.UUID]]:
 @pytest.fixture(autouse=True)
 async def _fresh_engine_per_test() -> AsyncIterator[None]:
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture
@@ -333,8 +344,12 @@ async def _allocate_and_plan(
 async def _advance_to_em_entrega(
     client: AsyncClient, headers: dict[str, str], tenant_id: uuid.UUID, trip_id: str
 ) -> None:
-    """`RASCUNHO` (com alocação já criada, `PLANEJADA`) até `EM_ENTREGA`, passando pelas
-    transições sem gatilho HTTP neste lote via `TripInternalTransitions` (D376)."""
+    """`RASCUNHO` (com alocação já criada, `PLANEJADA`) até `EM_ENTREGA`. `AGUARDANDO_CHECKLIST→
+    LIBERADA` ainda não tem endpoint HTTP (depende do lote de Checklist), então continua simulada
+    via `TripInternalTransitions` (D376) — mas `EM_DESLOCAMENTO→CARREGANDO` e `CARREGANDO→
+    EM_TRANSITO`/`EM_ENTREGA` passam a usar os comandos HTTP reais (V1 Operational Hardening,
+    Parte 2/3): `POST /coletas` e `POST /romaneios`, nunca mais `TripInternalTransitions.
+    register_collection`/`confirm_manifest`."""
 
     simulator = TripInternalTransitions()
     now = datetime.now(timezone.utc)
@@ -356,15 +371,91 @@ async def _advance_to_em_entrega(
     )
     assert delivery_resp.status_code == 201, delivery_resp.text
 
-    token = set_current_tenant_id(tenant_id)
-    try:
-        await simulator.register_collection(trip_id=uuid.UUID(trip_id), now=now)
-        await simulator.confirm_manifest(trip_id=uuid.UUID(trip_id), now=now)
-    finally:
-        reset_current_tenant_id(token)
+    collection_resp = await client.post(
+        f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True}
+    )
+    assert collection_resp.status_code == 201, collection_resp.text
+    assert collection_resp.json()["trip_operational_status"] == "CARREGANDO"
+
+    manifest_resp = await client.post(
+        f"/api/v1/viagens/{trip_id}/romaneios",
+        headers=headers,
+        json={
+            "document_number": "RM-0001",
+            "items": [{"description": "Pallet de caixas", "weight_kg": "120.50", "quantity": 2}],
+        },
+    )
+    assert manifest_resp.status_code == 201, manifest_resp.text
+    assert manifest_resp.json()["trip_operational_status"] == "EM_ENTREGA"
 
     trip_after = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
     assert trip_after.json()["status"]["operational"] == "EM_ENTREGA"
+
+
+class TestTripCreationIdempotency:
+    """V1 Operational Hardening, Parte 6 (D211) — prioridade 1 da lista: `POST /viagens` real,
+    Redis-backed, não mais só documentado (D418 fechado). `Idempotency-Key` é aceita, não exigida
+    (não quebra clientes que ainda não a enviam) — quando enviada, a dedução é real."""
+
+    async def test_same_key_and_payload_never_creates_a_second_trip(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        idempotency_key = str(uuid.uuid4())
+        payload = {"cliente_id": client_id}
+
+        first = await client.post(
+            "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert first.status_code == 201, first.text
+        trip_id = first.json()["id"]
+
+        second = await client.post(
+            "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["id"] == trip_id  # mesma Viagem, nunca uma segunda
+
+        list_resp = await client.get("/api/v1/viagens", headers=headers)
+        matching = [t for t in list_resp.json()["data"] if t["id"] == trip_id]
+        assert len(matching) == 1
+
+    async def test_same_key_with_different_payload_is_rejected(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        client_id_a = await _create_client(client, headers)
+        client_id_b = await _create_client(client, headers)
+        idempotency_key = str(uuid.uuid4())
+
+        first = await client.post(
+            "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key},
+            json={"cliente_id": client_id_a},
+        )
+        assert first.status_code == 201, first.text
+
+        second = await client.post(
+            "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key},
+            json={"cliente_id": client_id_b},
+        )
+        assert second.status_code == 409
+        assert second.json()["error"]["code"] == "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH"
+
+    async def test_without_idempotency_key_each_request_creates_its_own_trip(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Comportamento inalterado para clientes que ainda não enviam o header — a dedução real
+        não é imposta como pré-condição obrigatória de uso da API."""
+
+        headers, _, _ = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+
+        first = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        second = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["id"] != second.json()["id"]
 
 
 class TestTripLifecycle:
@@ -493,6 +584,139 @@ class TestTripAllocationFlow:
         assert sorted(statuses.values()) == ["SUBSTITUIDA", "VIGENTE"]
 
 
+class TestTripAllocationLifecycleFlow:
+    """V1 Operational Hardening, Parte 1 — a Alocação `VIGENTE` deixa de bloquear o Veículo assim
+    que a Viagem dona termina, por qualquer um dos três caminhos que produzem um estado terminal
+    (fluxo normal via `commands/finish`, `commands/cancelar`, `commands/close-administrative`).
+    Fecha o P0 do Go-Live Audit: antes desta correção, `alocacoes_recurso_viagem` permanecia
+    `VIGENTE` para sempre e `exists_vigente_for_vehicle_excluding_trip` bloqueava qualquer nova
+    Viagem no mesmo Veículo com `FREIGHT_VEHICLE_UNAVAILABLE`."""
+
+    async def test_finishing_a_trip_ends_its_allocation_and_frees_the_vehicle(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+        await _advance_to_em_entrega(client, headers, tenant_id, trip_id)
+
+        deliveries = await client.get(f"/api/v1/viagens/{trip_id}/entregas", headers=headers)
+        delivery_id = deliveries.json()["data"][0]["id"]
+        await client.post(f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}/canhoto", headers=headers, json={})
+        await client.patch(
+            f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}", headers=headers, json={"status": "CONCLUIDA"}
+        )
+
+        finish = await client.post(f"/api/v1/viagens/{trip_id}/commands/finish", headers=headers)
+        assert finish.status_code == 200, finish.text
+
+        history = await client.get(
+            f"/api/v1/viagens/{trip_id}/resources", headers=headers, params={"history": "true"}
+        )
+        assert [a["status"] for a in history.json()["data"]] == ["ENCERRADA"]
+
+        await self._assert_vehicle_is_reallocatable(client, headers, vehicle_id)
+
+    async def test_cancelling_a_trip_ends_its_allocation_and_frees_the_vehicle(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        cancelar = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/cancelar", headers=headers, json={"notes": "Cliente desistiu."}
+        )
+        assert cancelar.status_code == 200, cancelar.text
+
+        history = await client.get(
+            f"/api/v1/viagens/{trip_id}/resources", headers=headers, params={"history": "true"}
+        )
+        assert [a["status"] for a in history.json()["data"]] == ["ENCERRADA"]
+
+        await self._assert_vehicle_is_reallocatable(client, headers, vehicle_id)
+
+    async def test_closing_a_trip_administratively_ends_its_allocation_and_frees_the_vehicle(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        close = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/close-administrative",
+            headers=headers,
+            json={"justification": "Encerramento administrativo — viagem obsoleta."},
+        )
+        assert close.status_code == 200, close.text
+
+        history = await client.get(
+            f"/api/v1/viagens/{trip_id}/resources", headers=headers, params={"history": "true"}
+        )
+        assert [a["status"] for a in history.json()["data"]] == ["ENCERRADA"]
+
+        await self._assert_vehicle_is_reallocatable(client, headers, vehicle_id)
+
+    async def test_a_still_active_trip_keeps_blocking_double_allocation_of_the_same_vehicle(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        other_client_id = await _create_client(client, headers)
+        other_driver_id = await _create_driver(client, headers)
+        second_trip = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": other_client_id})
+        second_trip_id = second_trip.json()["id"]
+
+        blocked = await client.post(
+            f"/api/v1/viagens/{second_trip_id}/resources",
+            headers=headers,
+            json={"driver_id": other_driver_id, "tractor_unit_id": vehicle_id},
+        )
+        assert blocked.status_code == 422
+        assert blocked.json()["error"]["code"] == "FREIGHT_VEHICLE_UNAVAILABLE"
+
+    @staticmethod
+    async def _assert_vehicle_is_reallocatable(client: AsyncClient, headers: dict[str, str], vehicle_id: str) -> None:
+        """Veículo A: cria Viagem 2, aloca o MESMO Veículo A com sucesso — a prova pedida
+        explicitamente pelo usuário para os três cenários de encerramento."""
+
+        new_client_id = await _create_client(client, headers)
+        new_driver_id = await _create_driver(client, headers)
+        new_trip = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": new_client_id})
+        new_trip_id = new_trip.json()["id"]
+
+        reallocation = await client.post(
+            f"/api/v1/viagens/{new_trip_id}/resources",
+            headers=headers,
+            json={"driver_id": new_driver_id, "tractor_unit_id": vehicle_id},
+        )
+        assert reallocation.status_code == 201, reallocation.text
+        assert reallocation.json()["status"] == "VIGENTE"
+        assert reallocation.json()["tractor_unit_id"] == vehicle_id
+
+
 class TestTripAcceptFlow:
     async def test_accept_is_idempotent_and_never_changes_status(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
@@ -594,6 +818,135 @@ class TestTripCloseAdministrativeFlow:
         assert close.status_code == 200, close.text
         assert close.json()["status"]["operational"] == "FINALIZADA"
         assert close.json()["status"]["closed"] is False  # D019 — nunca força ENCERRADA
+
+
+class TestCollectionFlow:
+    """V1 Operational Hardening, Parte 2 — `POST /coletas` fecha `EM_DESLOCAMENTO → CARREGANDO`
+    (`018-trip-status.md`) usando exatamente `Trip.mark_collected()`, sem novo estado."""
+
+    async def test_registering_collection_moves_trip_to_carregando(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        simulator = TripInternalTransitions()
+        now = datetime.now(timezone.utc)
+        token = set_current_tenant_id(tenant_id)
+        try:
+            await simulator.await_checklist(trip_id=uuid.UUID(trip_id), now=now)
+            await simulator.approve_checklist(trip_id=uuid.UUID(trip_id), now=now)
+        finally:
+            reset_current_tenant_id(token)
+
+        too_early = await client.post(
+            f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True}
+        )
+        assert too_early.status_code == 409
+        assert too_early.json()["error"]["code"] == "FREIGHT_TRIP_INVALID_TRANSITION"
+
+        dispatch = await client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers)
+        assert dispatch.status_code == 200, dispatch.text
+
+        collect = await client.post(
+            f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True}
+        )
+        assert collect.status_code == 201, collect.text
+        assert collect.json()["trip_operational_status"] == "CARREGANDO"
+        assert collect.json()["cargo_checked"] is True
+
+        trip_after = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_after.json()["status"]["operational"] == "CARREGANDO"
+
+        duplicate = await client.post(
+            f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True}
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json()["error"]["code"] == "FREIGHT_COLLECTION_ALREADY_REGISTERED"
+
+
+class TestManifestFlow:
+    """V1 Operational Hardening, Parte 2/3 — `POST /romaneios` fecha `CARREGANDO → EM_TRANSITO`
+    (com cascata para `EM_ENTREGA` quando já há Entrega `PENDENTE`), usando exatamente
+    `Trip.mark_manifest_checked()`. Nenhum novo estado — a mesma máquina já documentada."""
+
+    async def test_manifest_requires_at_least_one_cargo_item(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        simulator = TripInternalTransitions()
+        now = datetime.now(timezone.utc)
+        token = set_current_tenant_id(tenant_id)
+        try:
+            await simulator.await_checklist(trip_id=uuid.UUID(trip_id), now=now)
+            await simulator.approve_checklist(trip_id=uuid.UUID(trip_id), now=now)
+        finally:
+            reset_current_tenant_id(token)
+
+        await client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers)
+        await client.post(f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True})
+
+        empty_items = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios", headers=headers, json={"document_number": None, "items": []}
+        )
+        assert empty_items.status_code == 422
+        assert empty_items.json()["error"]["code"] == "FREIGHT_MANIFEST_REQUIRES_CARGO_ITEM"
+
+        invalid_weight = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios",
+            headers=headers,
+            json={"items": [{"description": "Caixa", "weight_kg": "0", "quantity": 1}]},
+        )
+        assert invalid_weight.status_code == 422
+        assert invalid_weight.json()["error"]["code"] == "FREIGHT_CARGO_ITEM_PESO_INVALIDO"
+
+        ok = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios",
+            headers=headers,
+            json={"items": [{"description": "Caixa", "weight_kg": "10.00", "quantity": 1}]},
+        )
+        assert ok.status_code == 201, ok.text
+        # Nenhuma Entrega registrada nesta Viagem — cai direto em EM_TRANSITO, nunca EM_ENTREGA.
+        assert ok.json()["trip_operational_status"] == "EM_TRANSITO"
+        assert len(ok.json()["items"]) == 1
+
+        duplicate = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios",
+            headers=headers,
+            json={"items": [{"description": "Caixa 2", "weight_kg": "5.00", "quantity": 1}]},
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json()["error"]["code"] == "FREIGHT_MANIFEST_ALREADY_REGISTERED"
+
+    async def test_manifest_cascades_to_em_entrega_when_deliveries_are_pending(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+        await _advance_to_em_entrega(client, headers, tenant_id, trip_id)  # já cobre a cascata em si
+
+        trip_after = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_after.json()["status"]["operational"] == "EM_ENTREGA"
 
 
 class TestDeliveryFlow:
@@ -742,6 +1095,92 @@ class TestTimelineFlow:
         assert "OCORRENCIA" in sources
         assert "next_cursor" in timeline.json()["meta"]["pagination"]
         assert "total" not in timeline.json()["meta"]["pagination"]  # cursor, nunca offset (D372)
+
+
+class TestFullOperationalCycleFlow:
+    """V1 Operational Hardening, Parte 4 — Encerramento Real. Prova, numa única Viagem e sem
+    Encerramento Administrativo, o ciclo operacional completo pedido pelo usuário: despacho com
+    hodômetro de saída → Coleta real → Romaneio real → Entrega → Canhoto → `commands/finish` com
+    hodômetro de chegada → KM realizado corretamente calculado → Alocação `ENCERRADA` → Veículo
+    reutilizável numa segunda Viagem. Complementa (não substitui) a prova e2e "Dia Real da
+    Transportadora" — mais rápida, isolada, mesma asserção de fundo."""
+
+    async def test_finish_computes_km_ends_allocation_and_frees_vehicle_for_a_new_trip(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        simulator = TripInternalTransitions()
+        now = datetime.now(timezone.utc)
+        token = set_current_tenant_id(tenant_id)
+        try:
+            await simulator.await_checklist(trip_id=uuid.UUID(trip_id), now=now)
+            await simulator.approve_checklist(trip_id=uuid.UUID(trip_id), now=now)
+        finally:
+            reset_current_tenant_id(token)
+
+        dispatch = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers,
+            json={"departure_odometer_km": "100000.00"},
+        )
+        assert dispatch.status_code == 200, dispatch.text
+
+        delivery_resp = await client.post(
+            f"/api/v1/viagens/{trip_id}/entregas", headers=headers,
+            json={"order": 1, "recipient": "Fulano de Tal", "delivery_address": {"cidade": "São Paulo"}},
+        )
+        delivery_id = delivery_resp.json()["id"]
+
+        collect = await client.post(f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True})
+        assert collect.status_code == 201, collect.text
+
+        manifest = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios", headers=headers,
+            json={"items": [{"description": "Pallet", "weight_kg": "300.00", "quantity": 4}]},
+        )
+        assert manifest.status_code == 201, manifest.text
+        assert manifest.json()["trip_operational_status"] == "EM_ENTREGA"
+
+        await client.post(f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}/canhoto", headers=headers, json={})
+        await client.patch(
+            f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}", headers=headers, json={"status": "CONCLUIDA"}
+        )
+
+        finish = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/finish", headers=headers,
+            json={"arrival_odometer_km": "100350.50"},
+        )
+        assert finish.status_code == 200, finish.text
+        assert finish.json()["status"]["operational"] == "FINALIZADA"
+
+        # `km_rodado` é gravado por um efeito pós-commit (`TripOdometerRecorder`/
+        # `TripInternalTransitions.update_km_rodado`) — a resposta do próprio `finish` ainda não o
+        # reflete; um GET seguinte já mostra o valor calculado corretamente.
+        trip_after_finish = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_after_finish.json()["distance_traveled_km"] == "350.50"
+
+        allocation_history = await client.get(
+            f"/api/v1/viagens/{trip_id}/resources", headers=headers, params={"history": "true"}
+        )
+        assert [a["status"] for a in allocation_history.json()["data"]] == ["ENCERRADA"]
+
+        second_client_id = await _create_client(client, headers)
+        second_trip = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": second_client_id})
+        second_driver_id = await _create_driver(client, headers)
+
+        reallocate_same_vehicle = await client.post(
+            f"/api/v1/viagens/{second_trip.json()['id']}/resources",
+            headers=headers,
+            json={"driver_id": second_driver_id, "tractor_unit_id": vehicle_id},
+        )
+        assert reallocate_same_vehicle.status_code == 201, reallocate_same_vehicle.text
 
 
 class TestEncerradaAudit:

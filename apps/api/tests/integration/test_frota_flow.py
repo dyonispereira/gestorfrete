@@ -67,6 +67,9 @@ PERMISSION_CATALOG = [
     ("fleet.vehicle_composition.validate", "Validar composição veicular", "fleet"),
     ("fleet.odometer_reading.view", "Ver leituras de hodômetro", "fleet"),
     ("fleet.odometer_reading.create", "Registrar leitura de hodômetro", "fleet"),
+    ("fleet.vehicle_category.view", "Visualizar categoria de veículo", "fleet"),
+    ("fleet.vehicle_category.create", "Criar categoria de veículo", "fleet"),
+    ("fleet.vehicle_category.edit", "Editar categoria de veículo", "fleet"),
     # `disponibilidade_veiculo.motorista_atual_id` tem FK real para `motoristas` — o teste da
     # projeção precisa de um Motorista real (Lote 3) para satisfazer a constraint.
     ("drivers.driver.create", "Criar motoristas", "drivers"),
@@ -219,9 +222,11 @@ async def tenants() -> AsyncIterator[list[uuid.UUID]]:
 @pytest.fixture(autouse=True)
 async def _fresh_engine_per_test() -> AsyncIterator[None]:
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 @pytest.fixture
@@ -263,6 +268,60 @@ async def _logs_for(tenant_id: uuid.UUID, entidade_tipo: str, acao: str) -> list
 
 def _plate(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:6].upper()}"
+
+
+class TestVehicleCategoryFlow:
+    """V1 Operational Hardening, Parte 5 (D363) — CRUD real via HTTP, fechando o gap do Go-Live
+    Audit: um administrador consegue cadastrar Categoria de Veículo sem SQL direto."""
+
+    async def test_create_list_get_and_update(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, _ = await _full_access_actor(client, tenants)
+
+        create = await client.post("/api/v1/categorias-veiculo", headers=headers, json={"nome": "Bitrem"})
+        assert create.status_code == 201, create.text
+        assert create.json()["status"] == "ATIVA"
+        assert create.json()["nome"] == "Bitrem"
+        category_id = create.json()["id"]
+
+        duplicate = await client.post("/api/v1/categorias-veiculo", headers=headers, json={"nome": "Bitrem"})
+        assert duplicate.status_code == 409
+        assert duplicate.json()["error"]["code"] == "FLEET_VEHICLE_CATEGORY_NAME_ALREADY_EXISTS"
+
+        get_resp = await client.get(f"/api/v1/categorias-veiculo/{category_id}", headers=headers)
+        assert get_resp.status_code == 200
+        assert get_resp.json()["nome"] == "Bitrem"
+
+        list_resp = await client.get("/api/v1/categorias-veiculo", headers=headers)
+        assert list_resp.status_code == 200
+        assert any(c["id"] == category_id for c in list_resp.json()["data"])
+
+        update = await client.patch(
+            f"/api/v1/categorias-veiculo/{category_id}", headers=headers,
+            json={"nome": "Bitrem Canavieiro", "status": "INATIVA"},
+        )
+        assert update.status_code == 200, update.text
+        assert update.json()["nome"] == "Bitrem Canavieiro"
+        assert update.json()["status"] == "INATIVA"
+
+        creation_logs = await _logs_for(tenant_id, "categorias_veiculo", "CRIACAO")
+        assert uuid.UUID(category_id) in creation_logs
+
+    async def test_a_vehicle_can_be_registered_against_a_category_created_via_http(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Prova o objetivo da Parte 5: um administrador cadastra a Categoria pela API (sem SQL) e
+        já consegue usá-la para cadastrar um Veículo — a mesma Categoria, nenhum seed direto."""
+
+        headers, _, _ = await _full_access_actor(client, tenants)
+
+        create_category = await client.post("/api/v1/categorias-veiculo", headers=headers, json={"nome": "Truck"})
+        assert create_category.status_code == 201, create_category.text
+        category_id = create_category.json()["id"]
+
+        vehicle = await _create_vehicle(client, headers, uuid.UUID(category_id))
+        assert vehicle
 
 
 class TestVehicleFlow:

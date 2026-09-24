@@ -25,12 +25,21 @@ async def _fresh_engine_per_test() -> AsyncIterator[None]:
     happened to sort right after it alphabetically) never disposed it afterward — the pool kept
     connections bound to this test's now-closed event loop, crashing the very first Postgres-
     touching test in whichever file runs next. Same fixture every other integration test file
-    already has."""
+    already has.
+
+    V1 Operational Hardening, Parte 6 — same class of bug, now for Redis: `test_redis_is_reachable`
+    below is the only test in the whole suite that unconditionally calls `get_redis_client()`
+    (via `check_redis_connection`) regardless of `Idempotency-Key` — exactly the D383 pattern
+    repeating itself, caught because this file happens to sort right before
+    `test_management_result_flow.py`/`test_operacao_flow.py`, whose idempotency tests are real
+    Redis consumers and got `RuntimeError: Event loop is closed` from the stale cached client."""
 
     yield
+    from core.cache.redis_client import reset_redis_client
     from core.database.session import dispose_engine
 
     await dispose_engine()
+    await reset_redis_client()
 
 
 async def test_postgres_is_reachable() -> None:
