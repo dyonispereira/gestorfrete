@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const PASSWORD = "Senha123!";
-const CATEGORY_ID = "a7a10000-0000-0000-0000-0000000000c1";
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -41,7 +40,8 @@ async function createVehicle(page: Page, plate: string): Promise<string> {
   await page.fill("#vehicle-fabricante", "Volvo");
   await page.fill("#vehicle-modelo", "FH540");
   await page.fill("#vehicle-ano", "2023");
-  await page.fill("#vehicle-categoria", CATEGORY_ID);
+  await page.getByLabel("Categoria").click();
+  await page.getByRole("option", { name: "E2E Categoria" }).click();
 
   const [response] = await Promise.all([
     page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/veiculos")),

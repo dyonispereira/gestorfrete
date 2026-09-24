@@ -1,7 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const PASSWORD = "Senha123!";
-const CATEGORY_ID = "f14a0000-0000-0000-0000-0000000000c2";
 const ADMIN_EMAIL = "resultado-admin@e2e-fixture.com";
 // `request` (Node-side, no browser) does not go through the Next.js dev server's origin the way
 // `page` does — `apiFetch` in the browser calls `NEXT_PUBLIC_API_URL` directly, so API calls made
@@ -64,7 +63,8 @@ async function createVehicle(page: Page, plate: string): Promise<string> {
   await page.fill("#vehicle-fabricante", "Volvo");
   await page.fill("#vehicle-modelo", "FH540");
   await page.fill("#vehicle-ano", "2023");
-  await page.fill("#vehicle-categoria", CATEGORY_ID);
+  await page.getByLabel("Categoria").click();
+  await page.getByRole("option", { name: "E2E Categoria" }).click();
   const [response] = await Promise.all([
     page.waitForResponse((res) => res.request().method() === "POST" && res.url().endsWith("/veiculos")),
     page.getByRole("button", { name: "Criar veículo" }).click(),

@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const PASSWORD = "Senha123!";
-const CATEGORY_ID = "f10ea000-0000-0000-0000-0000000000c1";
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -28,7 +27,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#implement-plate", `IM${Date.now().toString().slice(-5)}`);
     await page.fill("#implement-renavam", uniqueDigits(11));
     await page.fill("#implement-load-capacity", "10000");
-    await page.fill("#implement-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar implemento" }).click();
     await expect(page.getByText("Implemento criado.")).toBeVisible({ timeout: 10_000 });
 
@@ -39,7 +39,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#vehicle-fabricante", "Volvo");
     await page.fill("#vehicle-modelo", "FH540");
     await page.fill("#vehicle-ano", "2023");
-    await page.fill("#vehicle-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar veículo" }).click();
     await expect(page.getByText(plate)).toBeVisible({ timeout: 10_000 });
 
@@ -59,7 +60,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#vehicle-fabricante", "Volvo");
     await page.fill("#vehicle-modelo", "FH540");
     await page.fill("#vehicle-ano", "2023");
-    await page.fill("#vehicle-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar veículo" }).click();
     await page.getByText(plate).click();
     await page.waitForURL("**/veiculos/**");
@@ -89,7 +91,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#implement-plate", implementPlate);
     await page.fill("#implement-renavam", uniqueDigits(11));
     await page.fill("#implement-load-capacity", "10000");
-    await page.fill("#implement-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar implemento" }).click();
     await expect(page.getByText("Implemento criado.")).toBeVisible({ timeout: 10_000 });
 
@@ -100,7 +103,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#vehicle-fabricante", "Volvo");
     await page.fill("#vehicle-modelo", "FH540");
     await page.fill("#vehicle-ano", "2023");
-    await page.fill("#vehicle-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar veículo" }).click();
     await page.getByText(plate).click();
     await page.waitForURL("**/veiculos/**");
@@ -139,7 +143,8 @@ test.describe("Sprint 12 — Frontend, Lote Frota", () => {
     await page.fill("#vehicle-fabricante", "Volvo");
     await page.fill("#vehicle-modelo", "FH540");
     await page.fill("#vehicle-ano", "2023");
-    await page.fill("#vehicle-categoria", CATEGORY_ID);
+    await page.getByLabel("Categoria").click();
+    await page.getByRole("option", { name: "E2E Categoria" }).click();
     await page.getByRole("button", { name: "Criar veículo" }).click();
     await page.getByText(plate).click();
     await page.waitForURL("**/veiculos/**");
