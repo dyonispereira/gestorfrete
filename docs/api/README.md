@@ -178,6 +178,7 @@ específico, mas capacidades usadas por praticamente todo o sistema.
 | [`087-integrations.md`](./087-integrations.md) | Configuração de Integração — contrato único, nunca uma API por fornecedor (D321) |
 | [`088-webhooks.md`](./088-webhooks.md) | Webhooks — `signing_secret` exibido uma única vez; histórico de tentativas de entrega é lacuna documentada, não inventada |
 | [`089-jobs.md`](./089-jobs.md) | Execução de Job — `commands/trigger` restrito, nunca dispara job arbitrário (D322) |
+| [`091-vehicle-categories.md`](./091-vehicle-categories.md) | Categoria de Veículo — D363 fechado (V1 Operational Hardening, Parte 5): CRUD real, domain/repository já existiam |
 | [`components/transversal-schemas.md`](./components/transversal-schemas.md) | `File`/`Attachment`/`Comment`/`Notification`/`ChannelPreference`/`IntegrationConfig`/`Webhook`/`JobExecution` |
 
 ## Components e contrato executável

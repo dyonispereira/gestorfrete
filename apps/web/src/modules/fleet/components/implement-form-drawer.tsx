@@ -21,6 +21,7 @@ import {
 import type { BodyType } from "@gestorfrete/types";
 
 import { useCreateImplementMutation } from "@/modules/fleet/hooks/use-implements";
+import { useVehicleCategoriesQuery } from "@/modules/fleet/hooks/use-vehicle-categories";
 import { ApiError } from "@/shared/lib/api-client";
 
 const BODY_TYPE_LABEL: Record<BodyType, string> = {
@@ -38,7 +39,10 @@ interface ImplementFormDrawerProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/** Create-only. `category_id` is a raw UUID input — same reason as Veículo: no Categoria endpoint exists (D363). */
+/**
+ * Create-only. `category_id` — Reconciliado (V1 Operational Hardening, Parte 5, D363): agora um
+ * `Select` real sobre `GET /categorias-veiculo`, mesmo padrão de `VehicleFormDrawer`.
+ */
 export function ImplementFormDrawer({ open, onOpenChange }: ImplementFormDrawerProps) {
   const [plate, setPlate] = React.useState("");
   const [renavam, setRenavam] = React.useState("");
@@ -48,6 +52,7 @@ export function ImplementFormDrawer({ open, onOpenChange }: ImplementFormDrawerP
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const createImplement = useCreateImplementMutation();
+  const categoriesQuery = useVehicleCategoriesQuery({ status: "ATIVA", limit: 100 });
 
   function reset() {
     setPlate("");
@@ -115,11 +120,24 @@ export function ImplementFormDrawer({ open, onOpenChange }: ImplementFormDrawerP
             <Input id="implement-load-capacity" required value={loadCapacity} onChange={(event) => setLoadCapacity(event.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="implement-categoria">ID da categoria (UUID)</Label>
-            <Input id="implement-categoria" required value={categoryId} onChange={(event) => setCategoryId(event.target.value)} />
-            <p className="text-xs text-muted-foreground">
-              Ainda não existe tela de Categorias de Veículo — cole o UUID da categoria já cadastrada no banco.
-            </p>
+            <Label htmlFor="implement-categoria">Categoria</Label>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger id="implement-categoria">
+                <SelectValue placeholder="Selecione uma categoria" />
+              </SelectTrigger>
+              <SelectContent>
+                {categoriesQuery.data?.data.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>
+                    {category.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {categoriesQuery.data?.data.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Nenhuma categoria ativa — crie uma em Frota → Categorias de Veículo antes.
+              </p>
+            ) : null}
           </div>
 
           {formError ? <p className="text-sm text-destructive">{formError}</p> : null}

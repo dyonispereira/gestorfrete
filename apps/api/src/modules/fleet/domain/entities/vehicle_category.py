@@ -8,10 +8,13 @@ from shared_kernel.domain.base_aggregate_root import BaseAggregateRoot
 
 
 class VehicleCategory(BaseAggregateRoot[uuid.UUID]):
-    """Entidade de Referência (D036) — `docs/domain/003-frota.md` "Categoria de Veículo".
-    Implementada sem `application`/`interfaces` própria (D363): nenhum contrato OpenAPI existe
-    ainda, apesar de `RBAC_MATRIX.md` já ter `fleet.vehicle_category.*`. Usada internamente por
-    `Vehicle`/`Implement` (FK obrigatória) e seedada diretamente pelo Repository nos testes."""
+    """Entidade de Referência (D036) — `docs/domain/003-frota.md` "Categoria de Veículo". Usada
+    internamente por `Vehicle`/`Implement` (FK obrigatória).
+
+    Reconciliado (V1 Operational Hardening, Parte 5): D363 fechado — `application`/`interfaces`
+    própria implementadas (`RBAC_MATRIX.md` já tinha `fleet.vehicle_category.*` reservado desde
+    antes). `codigo` é gerado internamente (mesmo padrão de `CostCenter.codigo`), nunca informado
+    pelo usuário — só `nome`/`status` são atributos documentados no Data Dictionary."""
 
     def __init__(
         self,
@@ -35,3 +38,10 @@ class VehicleCategory(BaseAggregateRoot[uuid.UUID]):
         return cls(
             id=uuid.uuid4(), codigo=codigo, nome=nome, status=VehicleCategoryStatus.ATIVA, created_at=now, updated_at=now
         )
+
+    def update(self, *, nome: str | None, status: VehicleCategoryStatus | None, now: datetime) -> None:
+        if nome is not None:
+            self.nome = nome
+        if status is not None:
+            self.status = status
+        self.updated_at = now

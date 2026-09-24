@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.multitenancy.context import get_current_tenant_id
@@ -47,3 +47,29 @@ class SqlAlchemyVehicleCategoryRepository(VehicleCategoryRepository):
         model.criado_em = category.created_at
         model.atualizado_em = category.updated_at
         await self._session.flush()
+
+    async def exists_with_nome(self, nome: str, *, excluding_id: uuid.UUID | None = None) -> bool:
+        tenant_id = get_current_tenant_id()
+        stmt = select(VehicleCategoryModel.id).where(
+            VehicleCategoryModel.tenant_id == tenant_id, VehicleCategoryModel.nome == nome
+        )
+        if excluding_id is not None:
+            stmt = stmt.where(VehicleCategoryModel.id != excluding_id)
+        return (await self._session.execute(stmt)).first() is not None
+
+    async def list_page(
+        self, *, page: int, limit: int, status: str | None, search: str | None
+    ) -> tuple[list[VehicleCategory], int]:
+        tenant_id = get_current_tenant_id()
+        stmt = select(VehicleCategoryModel).where(VehicleCategoryModel.tenant_id == tenant_id)
+        if status is not None:
+            stmt = stmt.where(VehicleCategoryModel.status == status)
+        if search is not None:
+            stmt = stmt.where(VehicleCategoryModel.nome.ilike(f"%{search}%"))
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self._session.execute(count_stmt)).scalar_one()
+
+        stmt = stmt.order_by(VehicleCategoryModel.nome).offset((page - 1) * limit).limit(limit)
+        models = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(m) for m in models], total

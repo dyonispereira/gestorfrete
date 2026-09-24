@@ -2,9 +2,25 @@
 
 import * as React from "react";
 
-import { Button, Input, Label, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, toast } from "@gestorfrete/ui";
+import {
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  toast,
+} from "@gestorfrete/ui";
 
 import { useCreateVehicleMutation } from "@/modules/fleet/hooks/use-vehicles";
+import { useVehicleCategoriesQuery } from "@/modules/fleet/hooks/use-vehicle-categories";
 import { ApiError } from "@/shared/lib/api-client";
 
 interface VehicleFormDrawerProps {
@@ -13,10 +29,10 @@ interface VehicleFormDrawerProps {
 }
 
 /**
- * Create-only. `categoria_id` is a raw UUID input, not a picker — there is no
- * `GET /vehicle-categories` (or any) endpoint at all (D363, Lote Frota audit); the field is
- * required by the Backend regardless. `branch_id` is optional and omitted here for the same
- * reason no branch picker exists (same call made for Centro de Custo in the Cadastros Lote).
+ * Create-only. `branch_id` is optional and omitted here — no branch picker exists (same call made
+ * for Centro de Custo em `037-cost-centers.md`). `categoria_id` — Reconciliado (V1 Operational
+ * Hardening, Parte 5, D363): agora um `Select` real sobre `GET /categorias-veiculo`, não mais um
+ * campo de UUID cru.
  */
 export function VehicleFormDrawer({ open, onOpenChange }: VehicleFormDrawerProps) {
   const [plate, setPlate] = React.useState("");
@@ -28,6 +44,7 @@ export function VehicleFormDrawer({ open, onOpenChange }: VehicleFormDrawerProps
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const createVehicle = useCreateVehicleMutation();
+  const categoriesQuery = useVehicleCategoriesQuery({ status: "ATIVA", limit: 100 });
 
   function reset() {
     setPlate("");
@@ -98,11 +115,24 @@ export function VehicleFormDrawer({ open, onOpenChange }: VehicleFormDrawerProps
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="vehicle-categoria">ID da categoria (UUID)</Label>
-            <Input id="vehicle-categoria" required value={categoriaId} onChange={(event) => setCategoriaId(event.target.value)} />
-            <p className="text-xs text-muted-foreground">
-              Ainda não existe tela de Categorias de Veículo — cole o UUID da categoria já cadastrada no banco.
-            </p>
+            <Label htmlFor="vehicle-categoria">Categoria</Label>
+            <Select value={categoriaId} onValueChange={setCategoriaId}>
+              <SelectTrigger id="vehicle-categoria">
+                <SelectValue placeholder="Selecione uma categoria" />
+              </SelectTrigger>
+              <SelectContent>
+                {categoriesQuery.data?.data.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>
+                    {category.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {categoriesQuery.data?.data.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Nenhuma categoria ativa — crie uma em Frota → Categorias de Veículo antes.
+              </p>
+            ) : null}
           </div>
 
           {formError ? <p className="text-sm text-destructive">{formError}</p> : null}

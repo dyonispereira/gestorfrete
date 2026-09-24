@@ -18,6 +18,7 @@ import {
   Receipt,
   Settings,
   ShieldCheck,
+  Tags,
   TrendingUp,
   Truck,
   Undo2,
@@ -130,6 +131,15 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "fleet",
     label: "Frota",
     items: [
+      {
+        id: "vehicle-categories",
+        label: "Categorias de Veículo",
+        href: "/categorias-veiculo",
+        icon: Tags,
+        requiredPermissions: ["fleet.vehicle_category.view"],
+        implemented: true,
+        description: "Classificação de Veículos e Implementos (D363).",
+      },
       {
         id: "vehicles",
         label: "Veículos",

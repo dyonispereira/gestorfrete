@@ -15,3 +15,11 @@ class VehicleCategoryRepository(ABC):
 
     @abstractmethod
     async def add(self, category: VehicleCategory) -> None: ...
+
+    @abstractmethod
+    async def exists_with_nome(self, nome: str, *, excluding_id: uuid.UUID | None = None) -> bool: ...
+
+    @abstractmethod
+    async def list_page(
+        self, *, page: int, limit: int, status: str | None, search: str | None
+    ) -> tuple[list[VehicleCategory], int]: ...
