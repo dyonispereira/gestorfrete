@@ -22,15 +22,20 @@ from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_sta
 
 
 class TripInternalTransitions:
-    """D376/D375 — simula os futuros consumidores de evento que este lote não implementa
-    (Checklist aprovado/`maintenance`, Coleta/Romaneio conferido/`freight` interno, MDF-e
-    encerrado/`documents`, Recebimento confirmado/`financial`). Nenhum método aqui é acionável por
-    HTTP — mesmo padrão do `VehicleAvailabilityProjector` (Lote 4, D247). Testes chamam estes
-    métodos diretamente para simular o evento e exercitar o restante da máquina de estados."""
+    """D376/D375 — ponte cross-módulo, não-HTTP, para outros módulos dispararem transições de
+    `Trip` sem que `freight` precise expor um comando dedicado para cada gatilho externo (mesmo
+    padrão do `VehicleAvailabilityProjector`, Lote 4, D247). `await_checklist`/`approve_checklist`
+    já são chamados por handlers HTTP reais (`maintenance.CreateChecklistHandler`/
+    `ApproveChecklistHandler`) desde que o módulo Checklist foi implementado — não são mais
+    simulação. Os demais métodos ainda simulam consumidores de evento que este lote não
+    implementa, ou (no caso de `register_collection`/`confirm_manifest`) ficaram órfãos depois que
+    Coleta/Romaneio ganharam seus próprios comandos, que chamam `Trip.mark_collected`/
+    `mark_manifest_checked` diretamente."""
 
     async def await_checklist(self, *, trip_id: uuid.UUID, now: datetime) -> None:
-        """Simula o gatilho "pronta para a data/rota programada" — `PLANEJADA→AGUARDANDO_
-        CHECKLIST`, sem comando/RBAC próprio (`018-trip-status.md`)."""
+        """Gatilho "pronta para a data/rota programada" — `PLANEJADA→AGUARDANDO_CHECKLIST`.
+        Chamado por `maintenance.CreateChecklistHandler` ao criar um Checklist para esta Viagem
+        (`018-trip-status.md`)."""
 
         async with SQLAlchemyUnitOfWork() as uow:
             trip_repo = SqlAlchemyTripRepository(uow.session)
@@ -53,7 +58,8 @@ class TripInternalTransitions:
             await uow.commit()
 
     async def approve_checklist(self, *, trip_id: uuid.UUID, now: datetime) -> None:
-        """Simula `ChecklistAprovado` — `AGUARDANDO_CHECKLIST→LIBERADA`."""
+        """`ChecklistAprovado` — `AGUARDANDO_CHECKLIST→LIBERADA`. Chamado por
+        `maintenance.ApproveChecklistHandler` ao aprovar o Checklist desta Viagem."""
 
         async with SQLAlchemyUnitOfWork() as uow:
             trip_repo = SqlAlchemyTripRepository(uow.session)
@@ -71,7 +77,7 @@ class TripInternalTransitions:
                     usuario_id=None,
                     origem="sistema",
                     now=now,
-                    observacao="Checklist aprovado (simulação — maintenance/007-CHECKLIST.md ainda não implementado).",
+                    observacao="Checklist aprovado.",
                 )
             )
             await uow.commit()

@@ -174,16 +174,20 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         self.status_operacional = TripOperationalStatus.PLANEJADA
 
     def await_checklist(self) -> None:
-        """D376 — simula o futuro gatilho "pronta para a data/rota programada" (`018-trip-
-        status.md`, sem comando/RBAC próprio). Nunca uma rota HTTP."""
+        """Gatilho "pronta para a data/rota programada" (`018-trip-status.md`, sem comando/RBAC
+        próprio nesta Viagem). Chamado via `TripInternalTransitions.await_checklist` por
+        `maintenance.CreateChecklistHandler` ao criar um Checklist para esta Viagem — não é uma
+        rota HTTP própria de `freight`, mas é acionado por uma rota HTTP real de outro módulo."""
 
         if self.status_operacional != TripOperationalStatus.PLANEJADA:
             raise ConflictError("FREIGHT_TRIP_INVALID_TRANSITION", "Viagem não está PLANEJADA.")
         self.status_operacional = TripOperationalStatus.AGUARDANDO_CHECKLIST
 
     def release_after_checklist(self) -> None:
-        """D376 — simula o futuro consumidor de `ChecklistAprovado` (`maintenance`, Checklist ainda
-        não implementado). Nunca uma rota HTTP."""
+        """Consumidor de `ChecklistAprovado`. Chamado via `TripInternalTransitions.approve_checklist`
+        por `maintenance.ApproveChecklistHandler` ao aprovar o Checklist desta Viagem — mesma
+        observação de `await_checklist`: não é uma rota HTTP própria de `freight`, mas é acionado
+        por uma rota HTTP real de `maintenance`."""
 
         if self.status_operacional != TripOperationalStatus.AGUARDANDO_CHECKLIST:
             raise ConflictError("FREIGHT_TRIP_INVALID_TRANSITION", "Viagem não está aguardando checklist.")
@@ -203,15 +207,16 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         self.placa_veiculo_snapshot = placa_veiculo_snapshot
 
     def mark_collected(self) -> None:
-        """D376 — simula o futuro endpoint de Coleta (fora de escopo, `015-trip-deliveries.md`)."""
+        """Chamado por `RegisterCollectionHandler` (`POST /viagens/{id}/coletas`,
+        `015-trip-deliveries.md`) — rota HTTP real."""
 
         if self.status_operacional != TripOperationalStatus.EM_DESLOCAMENTO:
             raise ConflictError("FREIGHT_TRIP_INVALID_TRANSITION", "Viagem não está EM_DESLOCAMENTO.")
         self.status_operacional = TripOperationalStatus.CARREGANDO
 
     def mark_manifest_checked(self, *, has_pending_deliveries: bool) -> list[TripOperationalStatus]:
-        """D376 — simula o futuro endpoint de Romaneio conferido (fora de escopo). Cascata para
-        `EM_ENTREGA` quando já há Entregas `PENDENTE` a atender (mesmo raciocínio de
+        """Chamado por `ConfirmManifestHandler` (`POST /viagens/{id}/romaneios`) — rota HTTP real.
+        Cascata para `EM_ENTREGA` quando já há Entregas `PENDENTE` a atender (mesmo raciocínio de
         `plan_and_await_checklist`)."""
 
         if self.status_operacional != TripOperationalStatus.CARREGANDO:
