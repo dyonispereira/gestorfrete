@@ -121,8 +121,17 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         updated_by: uuid.UUID,
         now: datetime,
     ) -> None:
-        if self.status != PayableStatus.LANCADA:
-            raise ConflictError("FINANCIAL_PAYABLE_INVALID_STATUS", "Só é possível editar uma Conta a Pagar LANCADA.")
+        """Pilot Hardening Final, Parte 5: a janela editável é `AGUARDANDO_APROVACAO`, não
+        `LANCADA`. `create()` já deriva `LANCADA→AGUARDANDO_APROVACAO`/`APROVADA` instantaneamente
+        pela alçada (nunca persiste `LANCADA` como estado observável via HTTP) — `LANCADA` era
+        portanto inalcançável e `update`/`soft_delete` eram código morto. `AGUARDANDO_APROVACAO` é
+        a janela real "antes de aprovada/paga" que existe de fato hoje; uma CP que nasce direto em
+        `APROVADA` (abaixo da alçada) fica imutável desde a criação — valor baixo, auto-confiável."""
+
+        if self.status != PayableStatus.AGUARDANDO_APROVACAO:
+            raise ConflictError(
+                "FINANCIAL_PAYABLE_INVALID_STATUS", "Só é possível editar uma Conta a Pagar Aguardando Aprovação."
+            )
         if fornecedor_id is not None:
             self.fornecedor_id = fornecedor_id
         if centro_custo_id is not None:
@@ -136,9 +145,12 @@ class AccountsPayable(BaseAggregateRoot[uuid.UUID]):
         self.audit = self.audit.touched(by=updated_by, at=now)
 
     def soft_delete(self, *, deleted_by: uuid.UUID, now: datetime) -> None:
-        if self.status != PayableStatus.LANCADA:
+        """Mesma janela de `update` — ver docstring acima."""
+
+        if self.status != PayableStatus.AGUARDANDO_APROVACAO:
             raise ConflictError(
-                "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS", "Só é possível excluir uma Conta a Pagar LANCADA."
+                "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS",
+                "Só é possível excluir uma Conta a Pagar Aguardando Aprovação.",
             )
         self.audit = self.audit.soft_deleted(by=deleted_by, at=now)
 

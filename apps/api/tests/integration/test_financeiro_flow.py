@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select, text
 
+from core.audit.models import LogAuditoriaModel
 from core.database.session import get_session_factory
 from core.multitenancy.context import reset_current_tenant_id, set_current_tenant_id
 from modules.crm.infrastructure.persistence.models.client_model import ClientModel
@@ -533,21 +534,6 @@ async def _prepare_invoiceable_trip_for_client(
     return trip_id, delivery_id
 
 
-async def _force_payable_status(payable_id: str, status: str) -> None:
-    """Flip direto de `status` para `LANCADA` — `AccountsPayable.create()` deriva a alçada de forma
-    instantânea (`accounts_payable.py`), então `status = LANCADA` nunca fica observável via HTTP.
-    `PATCH`/`DELETE` só são exercitáveis em `LANCADA`; sem essa manipulação de teste, os dois
-    endpoints seriam código morto — mesmo espírito de `TripInternalTransitions` (D376): simula uma
-    precondição que a máquina de estados real não deixa alcançar via API neste lote."""
-
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        await session.execute(
-            text("UPDATE contas_pagar SET status = :status WHERE id = :id"), {"status": status, "id": payable_id}
-        )
-        await session.commit()
-
-
 class TestChartOfAccountsFlow:
     async def test_crud_and_cycle_detection(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
@@ -825,27 +811,108 @@ class TestAccountsPayableFlow:
         assert pay.status_code == 400
         assert pay.json()["error"]["code"] == "FINANCIAL_BANK_ACCOUNT_INACTIVE"
 
-    async def test_delete_only_allowed_in_lancada(
+    async def test_update_and_delete_only_allowed_in_aguardando_aprovacao(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
     ) -> None:
+        """Pilot Hardening Final, Parte 5 — `AccountsPayable.create()` deriva `LANCADA→AGUARDANDO_
+        APROVACAO`/`APROVADA` instantaneamente pela alçada; `LANCADA` nunca fica observável via
+        HTTP. A janela editável real é `AGUARDANDO_APROVACAO` (acima da alçada) — provado aqui sem
+        nenhuma manipulação de SQL, e com o mesmo rigor de PATCH/DELETE nunca silenciosos que
+        `TestStatusHistoryAudit` já exige para os outros comandos de `contas_pagar`."""
+
         headers, _, _ = await _full_access_actor(client, tenants)
         supplier_id = await _create_supplier(client, headers)
         cost_center_id = await _create_cost_center(client, headers)
         chart_id = await _create_chart_of_accounts(client, headers)
 
-        create = await client.post(
+        # Abaixo da alçada: nasce direta em APROVADA, imutável desde a criação.
+        low_value = await client.post(
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
                 "value": "100.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
-        payable_id = create.json()["id"]
-        assert create.json()["status"] == "APROVADA"  # nunca LANCADA de forma observável (ver helper)
+        low_value_id = low_value.json()["id"]
+        assert low_value.json()["status"] == "APROVADA"
 
-        blocked = await client.delete(f"/api/v1/contas-pagar/{payable_id}", headers=headers)
-        assert blocked.status_code == 409
-        assert blocked.json()["error"]["code"] == "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS"
+        blocked_update = await client.patch(
+            f"/api/v1/contas-pagar/{low_value_id}", headers=headers, json={"value": "150.00"}
+        )
+        assert blocked_update.status_code == 409, blocked_update.text
+        assert blocked_update.json()["error"]["code"] == "FINANCIAL_PAYABLE_INVALID_STATUS"
+
+        blocked_delete = await client.delete(f"/api/v1/contas-pagar/{low_value_id}", headers=headers)
+        assert blocked_delete.status_code == 409, blocked_delete.text
+        assert blocked_delete.json()["error"]["code"] == "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS"
+
+        # Acima da alçada: nasce AGUARDANDO_APROVACAO — a janela real de correção pré-aprovação.
+        high_value = await client.post(
+            "/api/v1/contas-pagar", headers=headers,
+            json={
+                "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "AJUSTE_MANUAL",
+                "value": str(ALCADA_PADRAO + Decimal("1")), "due_date": "2026-09-01",
+                "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
+            },
+        )
+        payable_id = high_value.json()["id"]
+        assert high_value.json()["status"] == "AGUARDANDO_APROVACAO"
+
+        history_before = await self._history_count(payable_id)
+        assert history_before == 1  # a derivação LANCADA→AGUARDANDO_APROVACAO já gravou sua linha
+
+        update = await client.patch(
+            f"/api/v1/contas-pagar/{payable_id}", headers=headers,
+            json={"value": str(ALCADA_PADRAO + Decimal("50"))},
+        )
+        assert update.status_code == 200, update.text
+        assert update.json()["value"] == str(ALCADA_PADRAO + Decimal("50.00"))
+        assert update.json()["status"] == "AGUARDANDO_APROVACAO"  # update nunca muda status
+
+        history_after_update = await self._history_count(payable_id)
+        assert history_after_update == 2  # PATCH agora deixa rastro — nunca edição silenciosa
+
+        audit_after_update = await self._audit_count(payable_id)
+        assert audit_after_update == 1  # PATCH agora gera auditoria — antes não gerava nenhuma
+
+        approve = await client.post(f"/api/v1/contas-pagar/{payable_id}/commands/approve", headers=headers, json={})
+        assert approve.status_code == 200, approve.text
+
+        blocked_update_after_approve = await client.patch(
+            f"/api/v1/contas-pagar/{payable_id}", headers=headers, json={"value": "1.00"}
+        )
+        assert blocked_update_after_approve.status_code == 409, blocked_update_after_approve.text
+        assert blocked_update_after_approve.json()["error"]["code"] == "FINANCIAL_PAYABLE_INVALID_STATUS"
+
+        blocked_delete_after_approve = await client.delete(f"/api/v1/contas-pagar/{payable_id}", headers=headers)
+        assert blocked_delete_after_approve.status_code == 409, blocked_delete_after_approve.text
+        assert blocked_delete_after_approve.json()["error"]["code"] == "FINANCIAL_PAYABLE_DELETE_INVALID_STATUS"
+
+    async def _history_count(self, payable_id: str) -> int:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(PayableStatusHistoryModel.id).where(
+                        PayableStatusHistoryModel.conta_pagar_id == uuid.UUID(payable_id)
+                    )
+                )
+            ).all()
+        return len(rows)
+
+    async def _audit_count(self, payable_id: str) -> int:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(LogAuditoriaModel.id).where(
+                        LogAuditoriaModel.entidade_tipo == "contas_pagar",
+                        LogAuditoriaModel.entidade_id == uuid.UUID(payable_id),
+                        LogAuditoriaModel.acao == "ALTERACAO",
+                    )
+                )
+            ).all()
+        return len(rows)
 
 
 class TestInvoiceCreationIdempotency:
@@ -1492,39 +1559,39 @@ class TestTotalsDerivedFromAllocationAudit:
         assert baseline.status_code == 200
         assert baseline.json()["actual_cost"] in (None, "0.00")
 
+        # Valores acima da alçada — CP nasce AGUARDANDO_APROVACAO, a janela real em que DELETE é
+        # alcançável (Pilot Hardening Final, Parte 5), sem nenhuma manipulação de SQL.
         first = await client.post(
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "VIAGEM", "trip_id": trip_id,
-                "value": "300.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "1300.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert first.status_code == 201, first.text
+        assert first.json()["status"] == "AGUARDANDO_APROVACAO"
         first_id = first.json()["id"]
 
         after_first = await client.get(f"/api/v1/viagens/{trip_id}/financeiro", headers=view_headers)
-        assert after_first.json()["actual_cost"] == "300.00"
+        assert after_first.json()["actual_cost"] == "1300.00"
 
         second = await client.post(
             "/api/v1/contas-pagar", headers=headers,
             json={
                 "supplier_id": supplier_id, "cost_center_id": cost_center_id, "origin": "VIAGEM", "trip_id": trip_id,
-                "value": "200.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
+                "value": "1200.00", "due_date": "2026-09-01", "accounting_period": "2026-09-01", "chart_of_accounts_id": chart_id,
             },
         )
         assert second.status_code == 201, second.text
 
         after_second = await client.get(f"/api/v1/viagens/{trip_id}/financeiro", headers=view_headers)
-        assert after_second.json()["actual_cost"] == "500.00"  # soma dos dois rateios, nunca substituição
+        assert after_second.json()["actual_cost"] == "2500.00"  # soma dos dois rateios, nunca substituição
 
-        # "remover item" — DELETE só é alcançável em LANCADA (ver `_force_payable_status`); o
-        # endpoint real é exercitado normalmente a partir daí.
-        await _force_payable_status(first_id, "LANCADA")
         delete_resp = await client.delete(f"/api/v1/contas-pagar/{first_id}", headers=headers)
         assert delete_resp.status_code == 204, delete_resp.text
 
         after_delete = await client.get(f"/api/v1/viagens/{trip_id}/financeiro", headers=view_headers)
-        assert after_delete.json()["actual_cost"] == "200.00"  # só o segundo rateio permanece
+        assert after_delete.json()["actual_cost"] == "1200.00"  # só o segundo rateio permanece
 
     async def test_no_endpoint_accepts_realized_cost_directly(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
