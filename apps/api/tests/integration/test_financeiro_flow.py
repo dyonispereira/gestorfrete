@@ -969,13 +969,12 @@ class TestInvoiceAndReceivableFlow:
         trip_final = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
         assert trip_final.json()["status"]["financial"] == "RECEBIDA"  # última parcela confirmada
 
-        cancel = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
-        assert cancel.status_code == 200, cancel.text
-        assert cancel.json()["status"] == "CANCELADA"
-
-        cancel_again = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
-        assert cancel_again.status_code == 409
-        assert cancel_again.json()["error"]["code"] == "FINANCIAL_INVOICE_INVALID_STATUS"
+        # Pilot Hardening Final, Parte 4: toda parcela desta Fatura já tem valor recebido — cancelar
+        # agora é bloqueado (nunca faz receita já recebida desaparecer silenciosamente). Ver
+        # TestInvoiceCancellationGuardsReceivables para os cenários dedicados a essa regra.
+        cancel_blocked = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
+        assert cancel_blocked.status_code == 409, cancel_blocked.text
+        assert cancel_blocked.json()["error"]["code"] == "FINANCIAL_INVOICE_HAS_RECEIVED_RECEIVABLES"
 
     async def test_partial_receipt_leaves_balance_open_then_completes_and_rejects_invalid_amounts(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
@@ -1044,6 +1043,120 @@ class TestInvoiceAndReceivableFlow:
         already_received = await client.post(confirm_url, headers=headers, json={"received_value": "1.00"})
         assert already_received.status_code == 409, already_received.text
         assert already_received.json()["error"]["code"] == "FINANCIAL_RECEIVABLE_INVALID_TRANSITION"
+
+
+class TestInvoiceCancellationGuardsReceivables:
+    """Pilot Hardening Final, Parte 4 — cancelar uma Fatura nunca pode fazer receita já recebida
+    desaparecer silenciosamente. `contas_receber_status_enum` é fechado (D273): corrigir uma CR já
+    lançada é sempre Estorno (D266), nunca mutação direta de status. Sem um "CR cancelada"
+    representável, a regra é bloquear o cancelamento enquanto houver valor recebido."""
+
+    async def test_cancel_succeeds_when_no_receivable_has_received_anything(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        trip_id, _ = await _prepare_invoiceable_trip(client, headers, tenant_id, category_id)
+        client_id_resp = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        client_id = client_id_resp.json()["references"]["client_id"]
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+        invoice_id = create_invoice.json()["id"]
+
+        cancel = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
+        assert cancel.status_code == 200, cancel.text
+        assert cancel.json()["status"] == "CANCELADA"
+
+        cancel_again = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
+        assert cancel_again.status_code == 409, cancel_again.text
+        assert cancel_again.json()["error"]["code"] == "FINANCIAL_INVOICE_INVALID_STATUS"
+
+    async def test_cancel_is_blocked_when_a_receivable_is_partially_received(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        trip_id, _ = await _prepare_invoiceable_trip(client, headers, tenant_id, category_id)
+        client_id_resp = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        client_id = client_id_resp.json()["references"]["client_id"]
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+        invoice_id = create_invoice.json()["id"]
+
+        receivables = await client.get(f"/api/v1/faturas/{invoice_id}/contas-receber", headers=headers)
+        receivable_id = receivables.json()["data"][0]["id"]
+
+        partial = await client.post(
+            f"/api/v1/faturas/{invoice_id}/contas-receber/{receivable_id}/commands/confirm-receipt",
+            headers=headers, json={"received_value": "400.00"},
+        )
+        assert partial.status_code == 200, partial.text
+        assert partial.json()["status"] == "PARCIALMENTE_RECEBIDO"
+
+        cancel = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
+        assert cancel.status_code == 409, cancel.text
+        assert cancel.json()["error"]["code"] == "FINANCIAL_INVOICE_HAS_RECEIVED_RECEIVABLES"
+
+        # A Fatura continua EMITIDA — o bloqueio não deixou nada pela metade.
+        invoice_after = await client.get(f"/api/v1/faturas/{invoice_id}", headers=headers)
+        assert invoice_after.json()["status"] == "EMITIDA"
+
+    async def test_cancel_is_blocked_when_a_receivable_is_fully_received(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        payment_method_id = await _seed_payment_method(tenant_id)
+        trip_id, _ = await _prepare_invoiceable_trip(client, headers, tenant_id, category_id)
+        client_id_resp = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        client_id = client_id_resp.json()["references"]["client_id"]
+
+        create_invoice = await client.post(
+            "/api/v1/faturas", headers=headers,
+            json={
+                "trips": [{"trip_id": trip_id, "value": "1000.00"}], "client_id": client_id,
+                "payment_method_id": str(payment_method_id),
+                "installments": [{"value": "1000.00", "due_date": "2026-10-01", "accounting_period": "2026-10-01"}],
+            },
+        )
+        assert create_invoice.status_code == 201, create_invoice.text
+        invoice_id = create_invoice.json()["id"]
+
+        receivables = await client.get(f"/api/v1/faturas/{invoice_id}/contas-receber", headers=headers)
+        receivable_id = receivables.json()["data"][0]["id"]
+
+        full = await client.post(
+            f"/api/v1/faturas/{invoice_id}/contas-receber/{receivable_id}/commands/confirm-receipt",
+            headers=headers, json={"received_value": "1000.00"},
+        )
+        assert full.status_code == 200, full.text
+        assert full.json()["status"] == "RECEBIDA"
+
+        cancel = await client.post(f"/api/v1/faturas/{invoice_id}/commands/cancel", headers=headers)
+        assert cancel.status_code == 409, cancel.text
+        assert cancel.json()["error"]["code"] == "FINANCIAL_INVOICE_HAS_RECEIVED_RECEIVABLES"
+
+        # A receita recebida continua intacta — nem a CR, nem a Fatura mudaram de status.
+        receivable_after = await client.get(
+            f"/api/v1/faturas/{invoice_id}/contas-receber/{receivable_id}", headers=headers
+        )
+        assert receivable_after.json()["status"] == "RECEBIDA"
+        assert receivable_after.json()["received_value"] == "1000.00"
 
 
 class TestGroupedInvoicing:
