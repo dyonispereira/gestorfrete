@@ -124,7 +124,12 @@ uma chamada por Viagem.
 **Compatibilidade**: faturar uma única Viagem é `trips` com um elemento — mesmo endpoint, mesma
 validação, mesmo motor (não existe mais um caminho "individual" separado).
 
-**Segurança**: `financial.invoice.create`. **Idempotency-Key**: obrigatório (D211).
+**Segurança**: `financial.invoice.create`. **Idempotency-Key**: aceita e com enforcement real
+(Reconciliado, V1 Operational Hardening Parte 6 — `core/idempotency/`, `IDEMPOTENCY.md`); a
+documentação anterior dizia "obrigatório" sem nunca ter sido de fato exigida ou aplicada (D418) —
+corrigido aqui para refletir o comportamento real: aceita, não exigida (não quebra clientes que
+ainda não a enviam), mas real quando enviada — mesma chave + mesmo corpo nunca cria uma segunda
+Fatura.
 
 **Responses**: `201` (`Invoice`, com `trips` no corpo), `400` — `FINANCIAL_INVOICE_ORIGIN_MISMATCH`,
 `FINANCIAL_INVOICE_ADJUSTMENT_REASON_REQUIRED`, `FINANCIAL_INVOICE_DUPLICATE_TRIP`, `401`, `403`,
@@ -226,7 +231,9 @@ da baixa em si, não o valor total da parcela. Invariante: `0 < received_value <
 cada chamada é uma baixa, não uma operação de uma vez só. Quando o saldo zera, `status → RECEBIDA`;
 antes disso, `status → PARCIALMENTE_RECEBIDO`.
 
-**Segurança**: `financial.receivable.confirm_receipt`. **Idempotency-Key**: obrigatório (D211).
+**Segurança**: `financial.receivable.confirm_receipt`. **Idempotency-Key**: aceita e com
+enforcement real (Reconciliado, V1 Operational Hardening Parte 6 — corrige a mesma lacuna
+documentada acima em `POST /faturas`: "obrigatório" nunca foi de fato aplicado antes desta rodada).
 
 ```yaml
 requestBody:

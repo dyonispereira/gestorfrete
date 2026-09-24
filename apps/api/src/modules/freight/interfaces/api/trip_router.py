@@ -4,9 +4,10 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from core.database.session import get_session_factory
+from core.idempotency.guard import with_idempotency
 from modules.freight.application.commands.accept_trip import AcceptTripCommand, AcceptTripHandler
 from modules.freight.application.commands.cancelar_trip import CancelarTripCommand, CancelarTripHandler
 from modules.freight.application.commands.close_administrative_trip import (
@@ -92,18 +93,32 @@ async def get_trip(
     return TripResponse.from_dto(dto)
 
 
-@router.post("", response_model=TripResponse, status_code=201)
+@router.post("")
 async def create_trip(
-    body: CreateTripRequest, actor: AuthenticatedActor = Depends(require_permission("freight.trip.create"))
-) -> TripResponse:
-    handler = CreateTripHandler()
-    dto = await handler.handle(
-        CreateTripCommand(
-            actor=actor, cliente_id=body.cliente_id, data_programada=body.data_programada,
-            janela_programada=body.janela_programada,
+    body: CreateTripRequest,
+    response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.create")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — primeira prioridade da lista: retry/duplo-clique
+    nunca cria uma segunda Viagem quando `Idempotency-Key` é enviada."""
+
+    async def _run() -> TripResponse:
+        handler = CreateTripHandler()
+        dto = await handler.handle(
+            CreateTripCommand(
+                actor=actor, cliente_id=body.cliente_id, data_programada=body.data_programada,
+                janela_programada=body.janela_programada,
+            )
         )
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST", path="/viagens",
+        payload=body.model_dump(mode="json"), status_code=201, run=_run,
     )
-    return TripResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
 @router.patch("/{trip_id}", response_model=TripResponse)

@@ -63,8 +63,10 @@ requestBody:
 `ck_contas_pagar_origem_especifica` (D099, "todo lançamento tem origem explícita"), `400` caso
 contrário. `status` nasce sempre `LANCADA`.
 
-**Segurança**: `financial.payable.create`. **Idempotency-Key**: obrigatório (D211 — lançamento de
-despesa é uma das operações críticas do módulo).
+**Segurança**: `financial.payable.create`. **Idempotency-Key**: aceita e com enforcement real
+(Reconciliado, V1 Operational Hardening Parte 6, `core/idempotency/` — lançamento de despesa é uma
+das operações críticas do módulo; "obrigatório" era documentado desde D211 mas nunca de fato
+aplicado antes desta rodada, D418).
 
 **Responses**: `201` (`AccountsPayable`), `400`, `401`, `403`, `404` (Fornecedor/Centro de Custo/
 Plano de Contas/Viagem/OS não existe), `500`.
@@ -120,7 +122,9 @@ associada) — mesmo mecanismo de `DELETE /contas-pagar/{id}` (D390/D393). `appr
 `custo_realizado` — o custo já contava desde o lançamento (regime de competência,
 `006-financeiro.md`).
 
-**Segurança**: `financial.payable.approve` / `.reject`. **Idempotency-Key**: obrigatório.
+**Segurança**: `financial.payable.approve` / `.reject`. **Idempotency-Key**: aceita, sem
+enforcement real ainda — gap conhecido (só `POST` de criação e `commands/pay` ganharam a
+implementação real nesta rodada, V1 Operational Hardening Parte 6, `IDEMPOTENCY.md`).
 
 ```yaml
 requestBody:
@@ -153,8 +157,10 @@ hoje — não inventada aqui, D101/D102).
 kickoff**; não existe `POST /pagamentos` separado (`contas_pagar_status_history` já registra a
 transição, mesmo padrão de `026-maintenance-orders.md`).
 
-**Segurança**: `financial.payable.pay`. **Idempotency-Key**: obrigatório (D211 — pagamento é
-criticamente sensível a duplicação).
+**Segurança**: `financial.payable.pay`. **Idempotency-Key**: aceita e com enforcement real
+(Reconciliado, V1 Operational Hardening Parte 6, `core/idempotency/` — pagamento é criticamente
+sensível a duplicação; "obrigatório" era documentado desde D211 mas nunca de fato aplicado antes
+desta rodada, D418).
 
 ```yaml
 requestBody:

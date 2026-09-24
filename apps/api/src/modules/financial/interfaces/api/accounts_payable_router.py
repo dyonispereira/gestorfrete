@@ -4,9 +4,10 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from core.database.session import get_session_factory
+from core.idempotency.guard import with_idempotency
 from modules.financial.application.commands.approve_accounts_payable import (
     ApproveAccountsPayableCommand,
     ApproveAccountsPayableHandler,
@@ -130,22 +131,35 @@ async def list_expense_allocations(
     return {"data": items, "meta": {"pagination": {"page": 1, "limit": len(items), "total": len(items)}}}
 
 
-@router.post("", response_model=AccountsPayableResponse, status_code=201)
+@router.post("")
 async def create_accounts_payable(
     body: CreateAccountsPayableRequest,
+    response: Response,
     actor: AuthenticatedActor = Depends(require_permission("financial.payable.create")),
-) -> AccountsPayableResponse:
-    handler = CreateAccountsPayableHandler()
-    dto = await handler.handle(
-        CreateAccountsPayableCommand(
-            actor=actor, supplier_id=body.supplier_id, cost_center_id=body.cost_center_id,
-            origem=PayableOrigin(body.origin), trip_id=body.trip_id,
-            maintenance_order_id=body.maintenance_order_id, vehicle_id=body.vehicle_id, driver_id=body.driver_id,
-            valor=body.value, data_vencimento=body.due_date, competencia=body.accounting_period,
-            chart_of_accounts_id=body.chart_of_accounts_id,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — terceira prioridade da lista (lançamento com
+    efeito financeiro real, mesma categoria de `commands/pay` abaixo)."""
+
+    async def _run() -> AccountsPayableResponse:
+        handler = CreateAccountsPayableHandler()
+        dto = await handler.handle(
+            CreateAccountsPayableCommand(
+                actor=actor, supplier_id=body.supplier_id, cost_center_id=body.cost_center_id,
+                origem=PayableOrigin(body.origin), trip_id=body.trip_id,
+                maintenance_order_id=body.maintenance_order_id, vehicle_id=body.vehicle_id,
+                driver_id=body.driver_id, valor=body.value, data_vencimento=body.due_date,
+                competencia=body.accounting_period, chart_of_accounts_id=body.chart_of_accounts_id,
+            )
         )
+        return AccountsPayableResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST", path="/contas-pagar",
+        payload=body.model_dump(mode="json"), status_code=201, run=_run,
     )
-    return AccountsPayableResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
 @router.patch("/{accounts_payable_id}", response_model=AccountsPayableResponse)
@@ -204,16 +218,30 @@ async def reject_accounts_payable(
     return AccountsPayableResponse.from_dto(dto)
 
 
-@router.post("/{accounts_payable_id}/commands/pay", response_model=AccountsPayableResponse)
+@router.post("/{accounts_payable_id}/commands/pay")
 async def pay_accounts_payable(
     accounts_payable_id: uuid.UUID,
     body: PayAccountsPayableRequest,
+    response: Response,
     actor: AuthenticatedActor = Depends(require_permission("financial.payable.pay")),
-) -> AccountsPayableResponse:
-    handler = PayAccountsPayableHandler()
-    dto = await handler.handle(
-        PayAccountsPayableCommand(
-            actor=actor, accounts_payable_id=accounts_payable_id, bank_account_id=body.bank_account_id
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — terceira prioridade da lista (lançamento com
+    efeito financeiro real — nunca paga a mesma Conta a Pagar duas vezes por retry)."""
+
+    async def _run() -> AccountsPayableResponse:
+        handler = PayAccountsPayableHandler()
+        dto = await handler.handle(
+            PayAccountsPayableCommand(
+                actor=actor, accounts_payable_id=accounts_payable_id, bank_account_id=body.bank_account_id
+            )
         )
+        return AccountsPayableResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/contas-pagar/{accounts_payable_id}/commands/pay",
+        payload=body.model_dump(mode="json"), status_code=200, run=_run,
     )
-    return AccountsPayableResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body

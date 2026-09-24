@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from core.database.session import get_session_factory
 from core.exceptions.base import NotFoundError
+from core.idempotency.guard import with_idempotency
 from modules.documents.application.commands.cancel_cte import CancelCteCommand, CancelCteHandler
 from modules.documents.application.commands.create_correction_letter import (
     CreateCorrectionLetterCommand,
@@ -110,13 +111,28 @@ async def sign_cte(
     return CteResponse.from_dto(dto)
 
 
-@router.post("/{cte_id}/commands/transmit", response_model=CteResponse)
+@router.post("/{cte_id}/commands/transmit")
 async def transmit_cte(
-    cte_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("documents.cte.issue"))
-) -> CteResponse:
-    handler = TransmitCteHandler()
-    dto = await handler.handle(TransmitCteCommand(actor=actor, cte_id=cte_id))
-    return CteResponse.from_dto(dto)
+    cte_id: uuid.UUID,
+    response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("documents.cte.issue")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — quarta prioridade da lista: comando fiscal
+    interno que, retransmitido por retry de rede, nunca pode gerar um segundo protocolo SEFAZ
+    (ainda `SandboxSefazGateway` nesta fase, mesmo risco de duplicação em produção real)."""
+
+    async def _run() -> CteResponse:
+        handler = TransmitCteHandler()
+        dto = await handler.handle(TransmitCteCommand(actor=actor, cte_id=cte_id))
+        return CteResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/ctes/{cte_id}/commands/transmit", payload={}, status_code=200, run=_run,
+    )
+    response.status_code = status_code
+    return response_body
 
 
 @router.post("/{cte_id}/commands/receive-sefaz-response", response_model=CteResponse)

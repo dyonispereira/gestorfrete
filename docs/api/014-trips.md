@@ -47,8 +47,12 @@ escopo, não inventado — mesma disciplina de `?branch=` em `003-users.md`).
 
 ## `POST /api/v1/viagens`
 
-**Segurança**: `freight.trip.create`. **`Idempotency-Key` obrigatória** (D211/seção 15 do pedido —
-criar Viagem é operação crítica).
+**Segurança**: `freight.trip.create`. **`Idempotency-Key`**: aceita e com enforcement real
+(Reconciliado, V1 Operational Hardening Parte 6, `core/idempotency/` — primeira prioridade da
+lista pedida pelo usuário; "obrigatória" era documentado desde D211/seção 15 do pedido original
+mas nunca de fato aplicado antes desta rodada, D418). Aceita, não exigida — clientes que ainda não
+enviam o header continuam funcionando; quando enviado, a mesma chave + mesmo corpo nunca cria uma
+segunda Viagem.
 
 ```yaml
 requestBody:

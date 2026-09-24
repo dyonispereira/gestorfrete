@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from core.database.session import get_session_factory
+from core.idempotency.guard import with_idempotency
 from modules.financial.application.commands.cancel_invoice import CancelInvoiceCommand, CancelInvoiceHandler
 from modules.financial.application.commands.confirm_receipt_accounts_receivable import (
     ConfirmReceiptAccountsReceivableCommand,
@@ -99,25 +100,37 @@ async def get_invoice(
     return InvoiceResponse.from_dto(dto)
 
 
-@router.post("", response_model=InvoiceResponse, status_code=201)
+@router.post("")
 async def create_invoice(
     body: CreateInvoiceRequest,
+    response: Response,
     actor: AuthenticatedActor = Depends(require_permission("financial.invoice.create")),
-) -> InvoiceResponse:
-    handler = CreateInvoiceHandler()
-    dto = await handler.handle(
-        CreateInvoiceCommand(
-            actor=actor, trips=[InvoiceTripInput(trip_id=t.trip_id, value=t.value) for t in body.trips],
-            delivery_id=body.delivery_id, client_id=body.client_id,
-            adjustment_value=body.adjustment_value, adjustment_reason=body.adjustment_reason,
-            payment_method_id=body.payment_method_id,
-            installments=[
-                InvoiceInstallmentInput(value=i.value, due_date=i.due_date, accounting_period=i.accounting_period)
-                for i in body.installments
-            ],
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — segunda prioridade da lista."""
+
+    async def _run() -> InvoiceResponse:
+        handler = CreateInvoiceHandler()
+        dto = await handler.handle(
+            CreateInvoiceCommand(
+                actor=actor, trips=[InvoiceTripInput(trip_id=t.trip_id, value=t.value) for t in body.trips],
+                delivery_id=body.delivery_id, client_id=body.client_id,
+                adjustment_value=body.adjustment_value, adjustment_reason=body.adjustment_reason,
+                payment_method_id=body.payment_method_id,
+                installments=[
+                    InvoiceInstallmentInput(value=i.value, due_date=i.due_date, accounting_period=i.accounting_period)
+                    for i in body.installments
+                ],
+            )
         )
+        return InvoiceResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST", path="/faturas",
+        payload=body.model_dump(mode="json"), status_code=201, run=_run,
     )
-    return InvoiceResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
 @router.post("/{invoice_id}/commands/cancel", response_model=InvoiceResponse)
@@ -185,19 +198,32 @@ async def update_accounts_receivable(
     return AccountsReceivableResponse.from_dto(dto)
 
 
-@router.post(
-    "/{invoice_id}/contas-receber/{parcela_id}/commands/confirm-receipt", response_model=AccountsReceivableResponse
-)
+@router.post("/{invoice_id}/contas-receber/{parcela_id}/commands/confirm-receipt")
 async def confirm_receipt_accounts_receivable(
     invoice_id: uuid.UUID,
     parcela_id: uuid.UUID,
     body: ConfirmReceiptRequest,
+    response: Response,
     actor: AuthenticatedActor = Depends(require_permission("financial.receivable.confirm_receipt")),
-) -> AccountsReceivableResponse:
-    handler = ConfirmReceiptAccountsReceivableHandler()
-    dto = await handler.handle(
-        ConfirmReceiptAccountsReceivableCommand(
-            actor=actor, invoice_id=invoice_id, accounts_receivable_id=parcela_id, received_value=body.received_value
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """V1 Operational Hardening, Parte 6 (D211) — terceira prioridade da lista (baixa com efeito
+    financeiro real)."""
+
+    async def _run() -> AccountsReceivableResponse:
+        handler = ConfirmReceiptAccountsReceivableHandler()
+        dto = await handler.handle(
+            ConfirmReceiptAccountsReceivableCommand(
+                actor=actor, invoice_id=invoice_id, accounts_receivable_id=parcela_id,
+                received_value=body.received_value,
+            )
         )
+        return AccountsReceivableResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/faturas/{invoice_id}/contas-receber/{parcela_id}/commands/confirm-receipt",
+        payload=body.model_dump(mode="json"), status_code=200, run=_run,
     )
-    return AccountsReceivableResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body

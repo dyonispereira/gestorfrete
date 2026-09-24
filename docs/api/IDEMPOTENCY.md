@@ -1,5 +1,29 @@
 # IDEMPOTENCY.md — Idempotência na Camada HTTP
 
+## Status de implementação (Reconciliado, V1 Operational Hardening Parte 6)
+
+Antes desta rodada, `Idempotency-Key` era lido (não imposto) em só 2 rotas
+(`analytical_snapshot_router.py`/`export_router.py`, D418) e nenhuma delas deduplicava de fato — o
+Go-Live Audit registrou isso como P0 ("idempotência é só documentação"). Implementação real agora
+existe (`core/idempotency/`, Redis-backed, `IdempotencyStore`/`with_idempotency`), aceita — **não
+exigida** — nas 5 rotas priorizadas pelo usuário (aceita, para não quebrar clientes que ainda não
+enviam o header; quando enviada, a dedução é real):
+
+1. `POST /viagens` (criação de Viagem)
+2. `POST /faturas` (criação de Fatura)
+3. `POST /contas-pagar` (lançamento), `POST /contas-pagar/{id}/commands/pay` (baixa),
+   `POST /faturas/{id}/contas-receber/{id}/commands/confirm-receipt` (baixa) — lançamento/baixa
+   com efeito financeiro real
+4. `POST /ctes/{id}/commands/transmit` (comando fiscal interno que dispara `SandboxSefazGateway`)
+
+**Simplificação documentada, não escondida**: só respostas de sucesso (2xx) são retidas para
+replay — uma falha de negócio (`422`/`409`) propaga normalmente a cada tentativa, em vez de ficar
+"congelada" como resposta definitiva (o comportamento descrito abaixo em "Retry em falha" previa
+reter falhas de negócio também; esta primeira implementação prioriza o risco real — duplicar a
+entidade/efeito financeiro — sobre o caso já inofensivo de reenviar após erro). As demais rotas da
+tabela "Quando é obrigatório" abaixo continuam sem enforcement — gap conhecido, registrado no
+Go-Live Audit como item de rodada futura, não ampliado silenciosamente aqui.
+
 ## D211 — Idempotência para comandos críticos
 
 Operações sensíveis devem suportar `Idempotency-Key`. Este documento é a camada HTTP das decisões
@@ -95,5 +119,8 @@ juntas, nenhuma substitui a outra (defesa em profundidade, mesmo princípio já 
 
 ## Como este documento cresce
 
-Estável. Todo novo endpoint de comando crítico (Lote 2 em diante) declara explicitamente se exige
-`Idempotency-Key` no próprio contrato OpenAPI — nunca assumido implicitamente.
+5 rotas têm enforcement real (seção "Status de implementação" acima). O restante da tabela
+"Quando é obrigatório" é a lista-alvo para as próximas rodadas — sempre a mesma mecânica
+(`core/idempotency/`), nunca uma segunda implementação paralela. Todo novo endpoint de comando
+crítico declara explicitamente se exige `Idempotency-Key` no próprio contrato OpenAPI — nunca
+assumido implicitamente.
