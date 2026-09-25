@@ -60,7 +60,7 @@ alto nível; qualquer mudança de comando/versão deve ser feita no workflow, es
 acompanha).
 
 Três jobs, `backend`/`frontend` em paralelo, `e2e` só depois dos dois passarem (a barreira cara
-roda por último, nunca bloqueia feedback rápido de lint/tipo). Branch protection em `main` exige os
+roda por último, nunca bloqueia feedback rápido de lint/tipo). Branch protection em `master` exige os
 três jobs verdes antes de merge — esse é o mecanismo real de "impedir deploy de build quebrada"
 pedido pelo usuário; nenhum passo de deploy automático está incluído aqui (fora de escopo
 explícito, "não precisa criar uma plataforma DevOps complexa").
@@ -75,7 +75,7 @@ ainda), mas qualquer mecanismo de deploy futuro deve gatear o cutover de tráfeg
 
 ## Fora de escopo desta rodada (não esquecido)
 
-- Deploy automático (CD) — só a barreira de CI (build quebrada nunca chega a `main`), sem o próximo
+- Deploy automático (CD) — só a barreira de CI (build quebrada nunca chega a `master`), sem o próximo
   passo de promover automaticamente para produção.
 - Cache de dependências entre execuções do CI (acelera, não muda o que é verificado) — otimização,
   não correção.
