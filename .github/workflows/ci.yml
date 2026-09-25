@@ -133,4 +133,13 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           npx playwright install --with-deps
-          npx playwright test
+          # --timeout só aqui, via CLI (playwright.config.ts fica intocado — dev local continua com
+          # o default de 30s). Na primeira execução real do CI (36163844400) 6/42 specs falharam,
+          # todas com "Test timeout of 30000ms exceeded" ou navegação abortada, nunca uma asserção
+          # incorreta — e todas nos primeiros 12 testes; zero falhas do teste 13 em diante (30
+          # specs seguidas, incluindo os mesmos arquivos que falharam antes). `next dev` compila
+          # cada rota sob demanda na primeira visita — um runner efêmero e frio nunca tinha essa
+          # janela de "servidor já aquecido" que toda validação local sempre teve (dev server local
+          # roda por dias). CI/ambiente, não aplicação: mesmo binário, mesmos specs, mesmas
+          # asserções — só o timeout padrão do Playwright nunca tinha sido testado a frio antes.
+          npx playwright test --timeout=90000
