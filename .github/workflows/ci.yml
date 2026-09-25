@@ -36,18 +36,26 @@ jobs:
       JWT_SECRET_KEY: ci-only-secret-never-used-in-production
     steps:
       - uses: actions/checkout@v4
-      # MinIO precisa do subcomando `server /data`, que o bloco `services:` do GitHub Actions não
-      # tem como passar (só image/env/ports/options) — por isso roda como um `docker run` manual em
-      # vez de service container, com espera ativa pelo endpoint de health antes de seguir.
+      # A partir de set/2025 a MinIO Inc. passou a exigir login para pull de `minio/minio` tanto no
+      # Docker Hub quanto no Quay.io — a Community Edition virou source-only para distribuição
+      # livre. Em vez de depender de uma imagem de terceiro ou pinar uma tag antiga sem manutenção,
+      # compilamos o binário oficial do zero a cada execução, versão pinada por tag+commit em
+      # scripts/ci/build_minio.sh (nunca uma branch flutuante). Roda como processo direto — mais
+      # simples que empacotar em imagem quando só os testes Python precisam da porta 9000 aberta.
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - name: build minio from source
+        run: bash scripts/ci/build_minio.sh /tmp/minio-bin
       - name: start minio
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=gestorfrete -e MINIO_ROOT_PASSWORD=gestorfrete123 \
-            quay.io/minio/minio server /data
+          mkdir -p /tmp/minio-data
+          MINIO_ROOT_USER=gestorfrete MINIO_ROOT_PASSWORD=gestorfrete123 \
+            nohup /tmp/minio-bin server /tmp/minio-data > /tmp/minio.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
+          curl -sf http://localhost:9000/minio/health/live || (echo "MinIO não respondeu — log:"; cat /tmp/minio.log; exit 1)
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install poetry==1.8.3
@@ -92,6 +100,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # infra/compose/docker-compose.yml referencia minio/minio:latest, que o Docker Hub não deixa
+      # mais puxar anonimamente (ver o job backend). Em vez de editar o compose (usado também por
+      # devs localmente, onde a imagem já pode estar em cache), compilamos o mesmo binário oficial
+      # pinado e o empacotamos numa imagem local com exatamente essa tag — `docker compose up`
+      # nunca tenta um pull remoto quando a tag já existe no cache local do daemon.
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - name: build minio image from source (local tag only, no registry push)
+        run: |
+          mkdir -p /tmp/minio-image
+          bash scripts/ci/build_minio.sh /tmp/minio-image/minio
+          { echo 'FROM alpine:3.20'; \
+            echo 'COPY minio /usr/bin/minio'; \
+            echo 'ENTRYPOINT ["minio"]'; \
+          } > /tmp/minio-image/Dockerfile
+          docker build -t minio/minio:latest /tmp/minio-image
       - run: docker compose -f infra/compose/docker-compose.yml --env-file infra/compose/.env.example up -d
       - run: docker compose -f infra/compose/docker-compose.yml exec -T api poetry run alembic upgrade head
       - uses: pnpm/action-setup@v4
