@@ -8,33 +8,16 @@ negócio, não fazem parte deste documento. MinIO (uploads/documentos) tem sua p
 replicação de bucket, fora de escopo aqui (fica registrado como gap, não resolvido nesta rodada).
 
 Não existia nenhuma estratégia de backup documentada ou automatizada antes deste documento — P0
-registrado no Go-Live Audit.
+registrado no Go-Live Audit. **Pilot Hardening Final, Parte 1**: fechado — o script abaixo existe
+de verdade (`scripts/backup.sh`), não é mais só um bloco de bash dentro deste `.md`.
 
 ## `pg_dump` automatizado
 
-Formato `custom` (`-Fc`) — comprime, permite restore seletivo (schema/tabela específica) e restore
-paralelo, ao contrário de um dump `.sql` texto puro.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_DIR="${GESTORFRETE_BACKUP_DIR:-/var/backups/gestorfrete}"
-BACKUP_FILE="${BACKUP_DIR}/gestorfrete_${TIMESTAMP}.dump"
-
-mkdir -p "${BACKUP_DIR}"
-
-pg_dump \
-  --format=custom \
-  --file="${BACKUP_FILE}" \
-  "${DATABASE_URL_SYNC}"  # postgresql://user:pass@host:5432/gestorfrete — sem +asyncpg, pg_dump é sync
-
-# Falha se o dump ficou vazio/corrompido — nunca reporta sucesso de um backup inútil.
-pg_restore --list "${BACKUP_FILE}" > /dev/null
-
-echo "Backup gravado: ${BACKUP_FILE}"
-```
+Script real: [`scripts/backup.sh`](../../scripts/backup.sh). Formato `custom` (`-Fc`) — comprime,
+permite restore seletivo (schema/tabela específica) e restore paralelo, ao contrário de um dump
+`.sql` texto puro. Falha explicitamente (`exit 1`, sem fallback silencioso) se `DATABASE_URL_SYNC`
+não estiver definida; nunca hardcoda credencial. `GESTORFRETE_BACKUP_RETENTION_DAYS` (novo,
+default `35`) controla a poda ao final de cada execução — ver seção Retenção abaixo.
 
 Agendamento: `cron`/systemd timer diário fora do horário de pico de tráfego (a definir por
 ambiente de produção real — não existe ainda um ambiente de produção real para calibrar isso).
@@ -54,10 +37,9 @@ com necessidade real, não uma lei imutável):
 | 8–35 dias | 1 dump semanal |
 | 36+ dias | 1 dump mensal, por 12 meses |
 
-```bash
-# Poda simples por idade de arquivo — roda depois de cada backup bem-sucedido.
-find "${BACKUP_DIR}" -name 'gestorfrete_*.dump' -mtime +35 -delete
-```
+Poda simples por idade de arquivo (não a tiering diário/semanal/mensal completa — mesma
+simplificação já documentada), executada automaticamente ao final de `scripts/backup.sh`, com o
+número de dias controlável via `GESTORFRETE_BACKUP_RETENTION_DAYS`.
 
 ## Localização/configuração por ambiente
 
@@ -68,33 +50,45 @@ find "${BACKUP_DIR}" -name 'gestorfrete_*.dump' -mtime +35 -delete
 
 ## Procedimento de restore
 
-```bash
-# 1. Criar um banco novo, nunca restaurar por cima do banco vivo diretamente.
-createdb -U gestorfrete gestorfrete_restore_test
+Script real: [`scripts/restore.sh`](../../scripts/restore.sh) `<caminho-do-dump>`. Nunca toca no
+banco vivo — cria (`createdb -T template0`, evita um problema de metadado de collation observado
+no `postgis/postgis:16-3.4-alpine` local) um banco descartável `<dbname>_restore_test`, restaura
+(`pg_restore --clean --if-exists --no-owner`), valida (`alembic_version` + contagem de linhas em
+`viagens`/`contas_pagar`/`contas_receber`/`logs_auditoria`) e imprime tudo. Promover para o banco
+vivo (troca de `DATABASE_URL` + restart, nunca um `DROP DATABASE` automático) continua sendo uma
+decisão manual, deliberadamente fora do script.
 
-# 2. Restaurar o dump mais recente.
-pg_restore --dbname=gestorfrete_restore_test --clean --if-exists --no-owner \
-  "${BACKUP_DIR}/gestorfrete_<timestamp>.dump"
-
-# 3. Validar antes de promover: contagem de linhas nas tabelas de maior volume, Alembic no HEAD
-#    esperado, uma consulta de negócio real (ex.: uma Viagem específica ainda existe com o status
-#    correto).
-psql -U gestorfrete -d gestorfrete_restore_test -c "SELECT version_num FROM alembic_version;"
-psql -U gestorfrete -d gestorfrete_restore_test -c "SELECT count(*) FROM viagens;"
-
-# 4. Só depois de validado: apontar a aplicação para o banco restaurado (troca de
-#    DATABASE_URL + restart), nunca um DROP DATABASE do banco vivo como parte do procedimento
-#    normal — isso é uma decisão separada, humana, depois que o restore já provou estar íntegro.
-```
-
-## Teste real de restore
+## Teste real de restore — executado nesta rodada, não só documentado
 
 Backup nunca testado é backup que não existe de fato — a falha só aparece quando já é tarde demais.
-Mínimo exigido: rodar o procedimento de restore acima contra um banco descartável
-(`gestorfrete_restore_test`) pelo menos uma vez por ciclo de retenção (mensal), como parte da
-rotina operacional, não como um evento único de validação desta rodada. Sem essa disciplina
-recorrente, este documento é só uma promessa — a mesma armadilha que `IDEMPOTENCY.md` já tinha
-antes do V1 Operational Hardening Parte 6 (documentado, nunca executado).
+[`scripts/verify_backup_restore.sh`](../../scripts/verify_backup_restore.sh) automatiza a prova
+completa (cria um banco descartável → insere linhas conhecidas → `backup.sh` → corrompe/apaga as
+linhas originais → `restore.sh` → confirma que os valores ORIGINAIS, não os corrompidos, voltaram)
+e foi executado de ponta a ponta nesta rodada, duas vezes:
+
+1. **Prova de mecanismo** (schema mínimo, dados sintéticos): 3 linhas conhecidas inseridas, 1
+   corrompida (`UPDATE`) e 1 apagada (`DELETE`) depois do backup — o restore trouxe as 3 linhas
+   originais de volta, exatamente como gravadas antes da corrupção. Saída real:
+   ```
+   PROVA OK — dados originais recuperados integralmente:
+     1,viagem-conhecida-1,1234.56
+     2,viagem-conhecida-2,7890.12
+     3,viagem-conhecida-3,555.55
+   ```
+2. **Prova contra o schema real** (`backup.sh`/`restore.sh` direto, sem o wrapper de corrupção
+   sintética, contra o banco de desenvolvimento local): dump de 7.8MB; restore produziu
+   `alembic_version = 61bb63affb03` e as mesmas contagens do banco de origem (`viagens: 210`,
+   `contas_pagar: 176`, `contas_receber: 9`, `logs_auditoria: 73865`) — restore fiel ao schema real
+   da aplicação, não só a uma tabela de teste isolada.
+
+Executado neste ambiente via `docker exec` no container `postgres` (o host de desenvolvimento não
+tem `pg_dump`/`pg_restore`/`createdb` instalados — os scripts em si não assumem Docker, só exigem
+esses binários no PATH e `DATABASE_URL_SYNC` alcançável, conforme já documentado acima).
+
+**Disciplina operacional exigida a partir daqui**: rodar `verify_backup_restore.sh` (ou o
+procedimento manual equivalente) pelo menos uma vez por ciclo de retenção (mensal) contra o
+ambiente real do piloto, como rotina operacional recorrente — não como um evento único desta
+rodada. Sem essa disciplina, a prova acima vale para o dia em que foi rodada, não para sempre.
 
 ## Fora de escopo desta rodada (não esquecido)
 
