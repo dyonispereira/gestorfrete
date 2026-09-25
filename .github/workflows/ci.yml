@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env: { POSTGRES_USER: gestorfrete, POSTGRES_PASSWORD: gestorfrete, POSTGRES_DB: gestorfrete }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gestorfrete" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        env: { RABBITMQ_DEFAULT_USER: gestorfrete, RABBITMQ_DEFAULT_PASS: gestorfrete }
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://gestorfrete:gestorfrete@localhost:5432/gestorfrete
+      REDIS_URL: redis://localhost:6379/0
+      RABBITMQ_URL: amqp://gestorfrete:gestorfrete@localhost:5672/
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: gestorfrete
+      MINIO_SECRET_KEY: gestorfrete123
+      MINIO_SECURE: "false"
+      JWT_SECRET_KEY: ci-only-secret-never-used-in-production
+    steps:
+      - uses: actions/checkout@v4
+      # MinIO precisa do subcomando `server /data`, que o bloco `services:` do GitHub Actions não
+      # tem como passar (só image/env/ports/options) — por isso roda como um `docker run` manual em
+      # vez de service container, com espera ativa pelo endpoint de health antes de seguir.
+      - name: start minio
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=gestorfrete -e MINIO_ROOT_PASSWORD=gestorfrete123 \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 1
+          done
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install poetry==1.8.3
+      - working-directory: apps/api
+        run: poetry install
+      - name: ruff
+        working-directory: apps/api
+        run: poetry run ruff check .
+      - name: mypy
+        working-directory: apps/api
+        run: poetry run mypy src
+      - name: import-linter
+        working-directory: apps/api
+        run: PYTHONPATH=src poetry run lint-imports
+      - name: alembic upgrade head
+        working-directory: apps/api
+        run: poetry run alembic upgrade head
+      - name: pytest (unit)
+        working-directory: apps/api
+        run: poetry run pytest -q
+      - name: pytest (integration)
+        working-directory: apps/api
+        run: poetry run pytest -m integration -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - name: typecheck (web + packages/types)
+        run: pnpm typecheck
+      - name: lint
+        run: pnpm lint
+      - name: build
+        run: pnpm build
+
+  e2e:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f infra/compose/docker-compose.yml --env-file infra/compose/.env.example up -d
+      - run: docker compose -f infra/compose/docker-compose.yml exec -T api poetry run alembic upgrade head
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "pnpm" }
+      - name: playwright e2e
+        working-directory: apps/web
+        run: |
+          pnpm install --frozen-lockfile
+          npx playwright install --with-deps
+          npx playwright test
