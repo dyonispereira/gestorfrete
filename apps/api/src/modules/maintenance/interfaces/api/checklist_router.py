@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from core.database.session import get_session_factory
+from core.idempotency.guard import with_idempotency
 from modules.identity_access.interfaces.dependencies.authorization import require_permission
 from modules.maintenance.application.commands.approve_checklist import ApproveChecklistCommand, ApproveChecklistHandler
 from modules.maintenance.application.commands.create_checklist import CreateChecklistCommand, CreateChecklistHandler
@@ -98,25 +99,51 @@ async def submit_checklist(
     return ChecklistResponse.from_dto(dto)
 
 
-@router.post("/{checklist_id}/commands/approve", response_model=ChecklistResponse)
+@router.post("/{checklist_id}/commands/approve")
 async def approve_checklist(
-    checklist_id: uuid.UUID, actor: AuthenticatedActor = Depends(require_permission("maintenance.checklist.approve"))
-) -> ChecklistResponse:
-    handler = ApproveChecklistHandler()
-    dto = await handler.handle(ApproveChecklistCommand(actor=actor, checklist_id=checklist_id))
-    return ChecklistResponse.from_dto(dto)
+    checklist_id: uuid.UUID, response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("maintenance.checklist.approve")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — aprovar libera a Viagem (`AGUARDANDO_CHECKLIST→
+    LIBERADA` via `TripInternalTransitions`); retry/duplo-clique nunca dispara essa transição
+    duas vezes quando `Idempotency-Key` é enviada."""
 
+    async def _run() -> ChecklistResponse:
+        handler = ApproveChecklistHandler()
+        dto = await handler.handle(ApproveChecklistCommand(actor=actor, checklist_id=checklist_id))
+        return ChecklistResponse.from_dto(dto)
 
-@router.post("/{checklist_id}/commands/reject", response_model=ChecklistResponse)
-async def reject_checklist(
-    checklist_id: uuid.UUID, body: RejectChecklistRequest,
-    actor: AuthenticatedActor = Depends(require_permission("maintenance.checklist.reject")),
-) -> ChecklistResponse:
-    handler = RejectChecklistHandler()
-    dto = await handler.handle(
-        RejectChecklistCommand(actor=actor, checklist_id=checklist_id, observacao=body.observacao)
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/checklists/{checklist_id}/commands/approve", payload={}, status_code=200, run=_run,
     )
-    return ChecklistResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
+
+
+@router.post("/{checklist_id}/commands/reject")
+async def reject_checklist(
+    checklist_id: uuid.UUID, body: RejectChecklistRequest, response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("maintenance.checklist.reject")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — mesma proteção de `approve_checklist`."""
+
+    async def _run() -> ChecklistResponse:
+        handler = RejectChecklistHandler()
+        dto = await handler.handle(
+            RejectChecklistCommand(actor=actor, checklist_id=checklist_id, observacao=body.observacao)
+        )
+        return ChecklistResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/checklists/{checklist_id}/commands/reject", payload=body.model_dump(mode="json"),
+        status_code=200, run=_run,
+    )
+    response.status_code = status_code
+    return response_body
 
 
 @router.get("/{checklist_id}/status-history")

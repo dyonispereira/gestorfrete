@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import date, datetime, timezone
@@ -42,6 +43,10 @@ from modules.identity_access.infrastructure.persistence.models.identity_models i
     papel_permissao,
     usuarios_papeis,
 )
+from modules.maintenance.infrastructure.persistence.models.checklist_model import (
+    ChecklistModel,
+    ChecklistStatusHistoryModel,
+)
 from modules.tenancy.infrastructure.persistence.models.tenant_model import TenantModel
 from shared.collaboration.infrastructure.persistence.models.attachment_model import AttachmentModel
 from shared.collaboration.infrastructure.persistence.models.comment_model import CommentModel
@@ -80,6 +85,10 @@ PERMISSION_CATALOG = [
     ("drivers.driver.create", "Criar motoristas", "drivers"),
     ("drivers.driver.edit", "Editar motoristas", "drivers"),
     ("fleet.vehicle.create", "Criar veículos", "fleet"),
+    ("maintenance.checklist.view", "Ver checklists", "maintenance"),
+    ("maintenance.checklist.fill", "Preencher checklist", "maintenance"),
+    ("maintenance.checklist.approve", "Aprovar checklist", "maintenance"),
+    ("maintenance.checklist.reject", "Reprovar checklist", "maintenance"),
 ]
 ALL_PERMISSION_CODES = [c for c, _, _ in PERMISSION_CATALOG]
 
@@ -224,6 +233,10 @@ async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
         await session.execute(delete(CteModel).where(CteModel.tenant_id == tenant_id))
         await session.execute(delete(FiscalConfigurationModel).where(FiscalConfigurationModel.tenant_id == tenant_id))
         await session.execute(delete(TripModel).where(TripModel.tenant_id == tenant_id))
+        # Pilot Hardening Final, Parte 6 — checklists.veiculo_tracionador_id FK; precisa sair antes
+        # de VehicleModel.
+        await session.execute(delete(ChecklistStatusHistoryModel).where(ChecklistStatusHistoryModel.tenant_id == tenant_id))
+        await session.execute(delete(ChecklistModel).where(ChecklistModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleImpedimentModel).where(VehicleImpedimentModel.tenant_id == tenant_id))
         await session.execute(delete(VehicleAvailabilityModel).where(VehicleAvailabilityModel.tenant_id == tenant_id))
         await session.execute(delete(OdometerReadingModel).where(OdometerReadingModel.tenant_id == tenant_id))
@@ -456,6 +469,329 @@ class TestTripCreationIdempotency:
         assert first.status_code == 201
         assert second.status_code == 201
         assert first.json()["id"] != second.json()["id"]
+
+
+async def _create_trip_liberada(
+    client: AsyncClient, headers: dict[str, str], tenant_id: uuid.UUID, category_id: uuid.UUID
+) -> str:
+    """Viagem alocada e `LIBERADA` — ponto de partida comum para os testes de idempotência de
+    `commands/dispatch`/`coletas`/`romaneios`. `AGUARDANDO_CHECKLIST→LIBERADA` continua simulado
+    via `TripInternalTransitions` aqui, mesmo padrão já usado por `_advance_to_em_entrega`."""
+
+    client_id = await _create_client(client, headers)
+    driver_id = await _create_driver(client, headers)
+    vehicle_id = await _create_vehicle(client, headers, category_id)
+
+    create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+    trip_id = create.json()["id"]
+    await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+    simulator = TripInternalTransitions()
+    now = datetime.now(timezone.utc)
+    token = set_current_tenant_id(tenant_id)
+    try:
+        await simulator.await_checklist(trip_id=uuid.UUID(trip_id), now=now)
+        await simulator.approve_checklist(trip_id=uuid.UUID(trip_id), now=now)
+    finally:
+        reset_current_tenant_id(token)
+
+    return trip_id
+
+
+class TestOperationalIdempotencyCoverage:
+    """Pilot Hardening Final, Parte 6 — extensão da cobertura de idempotência (D211) para o fluxo
+    operacional principal: despacho, encerramento, coleta, romaneio e aprovação de checklist. Mesmo
+    mecanismo Redis-backed de `TestTripCreationIdempotency`, mesma prova: retry/duplo-clique nunca
+    produz um segundo efeito quando `Idempotency-Key` é enviada. Cada teste também confirma, sem a
+    chave, que o guard de domínio por trás continua rejeitando a repetição normalmente — a prova de
+    que o replay vem do cache, não de o comando passar a tolerar a transição repetida."""
+
+    async def test_dispatch_same_key_and_payload_never_dispatches_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_trip_liberada(client, headers, tenant_id, category_id)
+        idempotency_key = str(uuid.uuid4())
+        payload = {"departure_odometer_km": "1000.00"}
+
+        first = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/dispatch",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["status"]["operational"] == "EM_DESLOCAMENTO"
+
+        second = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/dispatch",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert second.status_code == 200, second.text
+        assert second.json() == first.json()  # mesma resposta, nenhum novo efeito
+
+        without_key = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers, json=payload
+        )
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "FREIGHT_TRIP_INVALID_TRANSITION"
+
+    async def test_finish_same_key_and_payload_never_finishes_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+        await _advance_to_em_entrega(client, headers, tenant_id, trip_id)
+
+        deliveries = await client.get(f"/api/v1/viagens/{trip_id}/entregas", headers=headers)
+        delivery_id = deliveries.json()["data"][0]["id"]
+        await client.post(f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}/canhoto", headers=headers, json={})
+        await client.patch(
+            f"/api/v1/viagens/{trip_id}/entregas/{delivery_id}", headers=headers, json={"status": "CONCLUIDA"}
+        )
+
+        idempotency_key = str(uuid.uuid4())
+        payload = {"arrival_odometer_km": "1500.00"}
+
+        first = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/finish",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["status"]["operational"] == "FINALIZADA"
+
+        second = await client.post(
+            f"/api/v1/viagens/{trip_id}/commands/finish",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+        )
+        assert second.status_code == 200, second.text
+        assert second.json() == first.json()
+
+        without_key = await client.post(f"/api/v1/viagens/{trip_id}/commands/finish", headers=headers, json=payload)
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "FREIGHT_TRIP_INVALID_TRANSITION"
+
+    async def test_collection_same_key_and_payload_never_registers_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_trip_liberada(client, headers, tenant_id, category_id)
+        dispatch = await client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers)
+        assert dispatch.status_code == 200, dispatch.text
+
+        idempotency_key = str(uuid.uuid4())
+        payload = {"cargo_checked": True}
+
+        first = await client.post(
+            f"/api/v1/viagens/{trip_id}/coletas", headers={**headers, "Idempotency-Key": idempotency_key},
+            json=payload,
+        )
+        assert first.status_code == 201, first.text
+        assert first.json()["trip_operational_status"] == "CARREGANDO"
+
+        second = await client.post(
+            f"/api/v1/viagens/{trip_id}/coletas", headers={**headers, "Idempotency-Key": idempotency_key},
+            json=payload,
+        )
+        assert second.status_code == 201, second.text
+        assert second.json() == first.json()
+
+        without_key = await client.post(f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json=payload)
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "FREIGHT_COLLECTION_ALREADY_REGISTERED"
+
+    async def test_manifest_same_key_and_payload_never_confirms_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_trip_liberada(client, headers, tenant_id, category_id)
+        await client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers)
+        await client.post(f"/api/v1/viagens/{trip_id}/coletas", headers=headers, json={"cargo_checked": True})
+
+        idempotency_key = str(uuid.uuid4())
+        payload = {"items": [{"description": "Pallet", "weight_kg": "50.00", "quantity": 1}]}
+
+        first = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios", headers={**headers, "Idempotency-Key": idempotency_key},
+            json=payload,
+        )
+        assert first.status_code == 201, first.text
+        assert first.json()["trip_operational_status"] == "EM_TRANSITO"
+
+        second = await client.post(
+            f"/api/v1/viagens/{trip_id}/romaneios", headers={**headers, "Idempotency-Key": idempotency_key},
+            json=payload,
+        )
+        assert second.status_code == 201, second.text
+        assert second.json() == first.json()
+
+        without_key = await client.post(f"/api/v1/viagens/{trip_id}/romaneios", headers=headers, json=payload)
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "FREIGHT_MANIFEST_ALREADY_REGISTERED"
+
+    async def test_checklist_approve_same_key_and_payload_never_approves_twice(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, category_id = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        driver_id = await _create_driver(client, headers)
+        vehicle_id = await _create_vehicle(client, headers, category_id)
+
+        create = await client.post("/api/v1/viagens", headers=headers, json={"cliente_id": client_id})
+        trip_id = create.json()["id"]
+        await _allocate_and_plan(client, headers, trip_id, driver_id, vehicle_id)
+
+        create_checklist = await client.post(
+            "/api/v1/checklists", headers=headers,
+            json={"type": "MOTORISTA_SAIDA", "reference_type": "VIAGEM", "reference_id": trip_id},
+        )
+        assert create_checklist.status_code == 201, create_checklist.text
+        checklist_id = create_checklist.json()["id"]
+
+        start = await client.post(f"/api/v1/checklists/{checklist_id}/commands/start", headers=headers)
+        assert start.status_code == 200, start.text
+
+        submit = await client.post(
+            f"/api/v1/checklists/{checklist_id}/commands/submit", headers=headers,
+            json={"itens": [{"descricao": "Pneus e estepe", "critico": True, "resposta": True}]},
+        )
+        assert submit.status_code == 200, submit.text
+        assert submit.json()["status"] == "CONCLUIDO"
+
+        idempotency_key = str(uuid.uuid4())
+
+        first = await client.post(
+            f"/api/v1/checklists/{checklist_id}/commands/approve",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json={},
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "APROVADO"
+
+        second = await client.post(
+            f"/api/v1/checklists/{checklist_id}/commands/approve",
+            headers={**headers, "Idempotency-Key": idempotency_key}, json={},
+        )
+        assert second.status_code == 200, second.text
+        assert second.json() == first.json()
+
+        trip_after = await client.get(f"/api/v1/viagens/{trip_id}", headers=headers)
+        assert trip_after.json()["status"]["operational"] == "LIBERADA"
+
+        without_key = await client.post(
+            f"/api/v1/checklists/{checklist_id}/commands/approve", headers=headers, json={}
+        )
+        assert without_key.status_code == 409
+        assert without_key.json()["error"]["code"] == "MAINTENANCE_CHECKLIST_INVALID_TRANSITION"
+
+
+class TestIdempotencyConcurrency:
+    """Pilot Hardening Final, Parte 6 — prova de comportamento sob concorrência real, não só
+    sequencial. `IdempotencyStore.reserve` usa `SET NX EX` (atômico no Redis): quando N requisições
+    concorrentes chegam com a mesma `Idempotency-Key`, só uma consegue reservar a chave — a garantia
+    vem do próprio Redis, não de sorte de agendamento do event loop. As demais esperam
+    (`_poll_for_response`) e replicam a resposta da dona, em vez de correr para `run()` também."""
+
+    async def test_concurrent_requests_same_key_and_payload_create_a_single_trip(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        client_id = await _create_client(client, headers)
+        idempotency_key = str(uuid.uuid4())
+        payload = {"cliente_id": client_id}
+
+        responses = await asyncio.gather(
+            *[
+                client.post("/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key}, json=payload)
+                for _ in range(5)
+            ]
+        )
+        assert all(r.status_code == 201 for r in responses), [r.text for r in responses]
+        ids = {r.json()["id"] for r in responses}
+        assert len(ids) == 1  # 5 requisições concorrentes, uma única Viagem
+
+        list_resp = await client.get("/api/v1/viagens", headers=headers)
+        matching = [t for t in list_resp.json()["data"] if t["id"] in ids]
+        assert len(matching) == 1
+
+    async def test_concurrent_requests_same_key_and_payload_dispatch_a_trip_once(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Segundo endpoint provado sob concorrência, não só criação — `dispatch` tem sua própria
+        guarda de domínio (`LIBERADA→EM_DESLOCAMENTO`, só uma vez); se o guard de idempotência
+        deixasse duas requisições passarem para `run()`, a perdedora bateria nessa guarda e
+        voltaria 409 em vez de replicar a resposta da vencedora — as 5 respostas idênticas abaixo
+        são a prova de que isso não aconteceu."""
+
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_trip_liberada(client, headers, tenant_id, category_id)
+        idempotency_key = str(uuid.uuid4())
+        payload = {"departure_odometer_km": "1000.00"}
+
+        responses = await asyncio.gather(
+            *[
+                client.post(
+                    f"/api/v1/viagens/{trip_id}/commands/dispatch",
+                    headers={**headers, "Idempotency-Key": idempotency_key}, json=payload,
+                )
+                for _ in range(5)
+            ]
+        )
+        assert all(r.status_code == 200 for r in responses), [r.text for r in responses]
+        bodies = [r.json() for r in responses]
+        assert all(b == bodies[0] for b in bodies)
+        assert bodies[0]["status"]["operational"] == "EM_DESLOCAMENTO"
+
+    async def test_concurrent_requests_same_key_different_payload_never_create_two_trips(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        client_id_a = await _create_client(client, headers)
+        client_id_b = await _create_client(client, headers)
+        idempotency_key = str(uuid.uuid4())
+
+        responses = await asyncio.gather(
+            client.post(
+                "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key},
+                json={"cliente_id": client_id_a},
+            ),
+            client.post(
+                "/api/v1/viagens", headers={**headers, "Idempotency-Key": idempotency_key},
+                json={"cliente_id": client_id_b},
+            ),
+        )
+        statuses = sorted(r.status_code for r in responses)
+        assert statuses == [201, 409], [r.text for r in responses]  # uma cria, a outra é rejeitada
+        mismatch = next(r for r in responses if r.status_code == 409)
+        assert mismatch.json()["error"]["code"] == "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH"
+
+        list_resp = await client.get("/api/v1/viagens", headers=headers)
+        assert len(list_resp.json()["data"]) == 1  # nunca duas Viagens, mesmo sob concorrência
+
+    async def test_concurrent_requests_same_literal_key_across_tenants_never_collide(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers_a, _, _ = await _full_access_actor(client, tenants)
+        headers_b, _, _ = await _full_access_actor(client, tenants)
+        client_id_a = await _create_client(client, headers_a)
+        client_id_b = await _create_client(client, headers_b)
+        idempotency_key = str(uuid.uuid4())  # mesma chave literal, dois tenants diferentes
+
+        responses = await asyncio.gather(
+            client.post(
+                "/api/v1/viagens", headers={**headers_a, "Idempotency-Key": idempotency_key},
+                json={"cliente_id": client_id_a},
+            ),
+            client.post(
+                "/api/v1/viagens", headers={**headers_b, "Idempotency-Key": idempotency_key},
+                json={"cliente_id": client_id_b},
+            ),
+        )
+        assert all(r.status_code == 201 for r in responses), [r.text for r in responses]
+        assert responses[0].json()["id"] != responses[1].json()["id"]  # sem colisão entre tenants
 
 
 class TestTripLifecycle:

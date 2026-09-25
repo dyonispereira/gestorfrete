@@ -206,49 +206,88 @@ async def accept_trip(
     return TripResponse.from_dto(dto)
 
 
-@router.post("/{trip_id}/commands/dispatch", response_model=TripResponse)
+@router.post("/{trip_id}/commands/dispatch")
 async def dispatch_trip(
-    trip_id: uuid.UUID, body: DispatchTripRequest | None = None,
+    trip_id: uuid.UUID, response: Response, body: DispatchTripRequest | None = None,
     actor: AuthenticatedActor = Depends(require_permission("freight.trip.dispatch")),
-) -> TripResponse:
-    handler = DispatchTripHandler()
-    dto = await handler.handle(
-        DispatchTripCommand(
-            actor=actor, trip_id=trip_id, origin="portal_gestor",
-            hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — retry/duplo-clique nunca despacha a Viagem duas
+    vezes quando `Idempotency-Key` é enviada."""
+
+    async def _run() -> TripResponse:
+        handler = DispatchTripHandler()
+        dto = await handler.handle(
+            DispatchTripCommand(
+                actor=actor, trip_id=trip_id, origin="portal_gestor",
+                hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+            )
         )
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/viagens/{trip_id}/commands/dispatch",
+        payload=body.model_dump(mode="json") if body is not None else {}, status_code=200, run=_run,
     )
-    return TripResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
-@router.post("/{trip_id}/commands/start", response_model=TripResponse)
+@router.post("/{trip_id}/commands/start")
 async def start_trip(
-    trip_id: uuid.UUID, body: DispatchTripRequest | None = None,
+    trip_id: uuid.UUID, response: Response, body: DispatchTripRequest | None = None,
     actor: AuthenticatedActor = Depends(require_permission("freight.trip.start")),
-) -> TripResponse:
-    handler = DispatchTripHandler()
-    dto = await handler.handle(
-        DispatchTripCommand(
-            actor=actor, trip_id=trip_id, origin="app_motorista",
-            hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — mesma proteção de `dispatch_trip`, para o mesmo
+    comando disparado a partir do app do motorista (`origin` diferente)."""
+
+    async def _run() -> TripResponse:
+        handler = DispatchTripHandler()
+        dto = await handler.handle(
+            DispatchTripCommand(
+                actor=actor, trip_id=trip_id, origin="app_motorista",
+                hodometro_saida_km=body.departure_odometer_km if body is not None else None,
+            )
         )
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/viagens/{trip_id}/commands/start",
+        payload=body.model_dump(mode="json") if body is not None else {}, status_code=200, run=_run,
     )
-    return TripResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
-@router.post("/{trip_id}/commands/finish", response_model=TripResponse)
+@router.post("/{trip_id}/commands/finish")
 async def finish_trip(
-    trip_id: uuid.UUID, body: FinishTripRequest | None = None,
+    trip_id: uuid.UUID, response: Response, body: FinishTripRequest | None = None,
     actor: AuthenticatedActor = Depends(require_permission("freight.trip.finish")),
-) -> TripResponse:
-    handler = FinishTripHandler()
-    dto = await handler.handle(
-        FinishTripCommand(
-            actor=actor, trip_id=trip_id,
-            hodometro_chegada_km=body.arrival_odometer_km if body is not None else None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — retry/duplo-clique nunca encerra a Viagem duas
+    vezes quando `Idempotency-Key` é enviada."""
+
+    async def _run() -> TripResponse:
+        handler = FinishTripHandler()
+        dto = await handler.handle(
+            FinishTripCommand(
+                actor=actor, trip_id=trip_id,
+                hodometro_chegada_km=body.arrival_odometer_km if body is not None else None,
+            )
         )
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/viagens/{trip_id}/commands/finish",
+        payload=body.model_dump(mode="json") if body is not None else {}, status_code=200, run=_run,
     )
-    return TripResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
 
 
 @router.post("/{trip_id}/commands/interromper", response_model=TripResponse)

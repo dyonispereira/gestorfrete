@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Response
 
+from core.idempotency.guard import with_idempotency
 from modules.freight.application.commands.register_collection import (
     RegisterCollectionCommand,
     RegisterCollectionHandler,
@@ -15,14 +17,27 @@ from shared_kernel.domain.actor import AuthenticatedActor
 router = APIRouter(prefix="/viagens", tags=["Trip Collection"])
 
 
-@router.post("/{trip_id}/coletas", response_model=CollectionResponse, status_code=201)
+@router.post("/{trip_id}/coletas")
 async def register_collection(
     trip_id: uuid.UUID,
     body: RegisterCollectionRequest,
+    response: Response,
     actor: AuthenticatedActor = Depends(require_permission("freight.pickup.create")),
-) -> CollectionResponse:
-    handler = RegisterCollectionHandler()
-    dto = await handler.handle(
-        RegisterCollectionCommand(actor=actor, trip_id=trip_id, conferencia_ok=body.cargo_checked)
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Pilot Hardening Final, Parte 6 (D211) — retry/duplo-clique nunca registra a Coleta duas
+    vezes quando `Idempotency-Key` é enviada."""
+
+    async def _run() -> CollectionResponse:
+        handler = RegisterCollectionHandler()
+        dto = await handler.handle(
+            RegisterCollectionCommand(actor=actor, trip_id=trip_id, conferencia_ok=body.cargo_checked)
+        )
+        return CollectionResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/viagens/{trip_id}/coletas", payload=body.model_dump(mode="json"), status_code=201, run=_run,
     )
-    return CollectionResponse.from_dto(dto)
+    response.status_code = status_code
+    return response_body
