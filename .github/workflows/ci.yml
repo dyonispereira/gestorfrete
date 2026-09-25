@@ -111,8 +111,15 @@ jobs:
         run: |
           mkdir -p /tmp/minio-image
           bash scripts/ci/build_minio.sh /tmp/minio-image/minio
+          # o healthcheck do serviço minio em docker-compose.yml roda `mc ready local` dentro do
+          # container — a imagem oficial sempre empacotou minio+mc juntos, então uma imagem só com
+          # o servidor nunca passa nesse healthcheck (confirmado: container ficou "Error" depois de
+          # 50s/10 tentativas na primeira execução desta correção). `mc ready local` não precisa de
+          # nenhuma credencial/env var — testado localmente antes de subir.
+          bash scripts/ci/build_mc.sh /tmp/minio-image/mc
           { echo 'FROM alpine:3.20'; \
             echo 'COPY minio /usr/bin/minio'; \
+            echo 'COPY mc /usr/bin/mc'; \
             echo 'ENTRYPOINT ["minio"]'; \
           } > /tmp/minio-image/Dockerfile
           docker build -t minio/minio:latest /tmp/minio-image
