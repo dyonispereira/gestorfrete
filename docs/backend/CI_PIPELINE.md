@@ -18,7 +18,10 @@ original também só declarava serviços de `postgres`/`redis` no job `backend`,
 `integration` do `pytest.ini_options` já documentava depender de `rabbitmq`/`minio` também
 (`test_infrastructure_connectivity.py` testa isso diretamente) — o workflow real inclui `rabbitmq`
 como serviço e sobe o MinIO via `docker run` manual (o bloco `services:` do GitHub Actions não
-aceita um comando customizado como o `server /data` que a imagem `minio/minio` exige).
+aceita um comando customizado como o `server /data` que a imagem exige). Imagem puxada de
+`quay.io/minio/minio`, não `minio/minio` do Docker Hub — confirmado na primeira execução real do CI
+(`2026-09-25`) que o Docker Hub rejeita pull anônimo dessa imagem (`pull access denied`); Quay.io é
+o outro registry oficial do MinIO e aceita pull sem autenticação.
 
 ## O que o pipeline verifica (backend, `apps/api/`)
 
