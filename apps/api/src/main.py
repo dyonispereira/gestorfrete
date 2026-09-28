@@ -37,7 +37,19 @@ def create_app() -> FastAPI:
     configure_logging()
     settings = get_settings()
 
-    app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+    # Production Readiness Hardening, Parte 4 — /docs, /redoc e /openapi.json ficavam sempre
+    # habilitados, em qualquer ambiente (Discovery de Ambiente confirmou isso como gap real).
+    # Desabilitados por padrão em produção; se algum dia for preciso documentação pública em
+    # produção, isso vira uma decisão explícita (reabilitar aqui), nunca o default silencioso.
+    docs_enabled = not settings.is_production
+    app = FastAPI(
+        title=settings.app_name,
+        debug=settings.debug,
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
 
     identity_access_wiring.register()
     register_exception_handlers(app)
