@@ -355,7 +355,7 @@ async def _upload_file(client: AsyncClient, headers: dict[str, str], content: by
 
     initiate = await client.post(
         "/api/v1/storage/uploads", headers=headers,
-        json={"name": "evidencia.txt", "mime_type": "text/plain", "size_bytes": len(content), "origin": "UPLOAD_DIRETO"},
+        json={"name": "evidencia.pdf", "mime_type": "application/pdf", "size_bytes": len(content), "origin": "UPLOAD_DIRETO"},
     )
     assert initiate.status_code == 201, initiate.text
     body = initiate.json()
@@ -401,7 +401,7 @@ class TestStorageFlow:
         initiate_v2 = await client.post(
             "/api/v1/storage/uploads", headers=headers,
             json={
-                "name": "evidencia.txt", "mime_type": "text/plain", "size_bytes": len(new_content),
+                "name": "evidencia.pdf", "mime_type": "application/pdf", "size_bytes": len(new_content),
                 "origin": "UPLOAD_DIRETO", "previous_file_id": file_id,
             },
         )
@@ -433,6 +433,132 @@ class TestStorageFlow:
 
         delete_v2 = await client.delete(f"/api/v1/storage/files/{initiate_v2.json()['file_id']}", headers=headers)
         assert delete_v2.status_code == 204
+
+
+class TestUploadHardening:
+    """Production Readiness Hardening, Parte 3 — allowlist de tipo e teto de tamanho, validados
+    ANTES da URL assinada (declaração) e reconferidos com o tamanho REAL devolvido pelo MinIO
+    (confirmação) — a segunda camada é a que realmente importa, já que o binário nunca passa pela
+    API (D314)."""
+
+    async def test_allowed_format_succeeds(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+
+        initiate = await client.post(
+            "/api/v1/storage/uploads", headers=headers,
+            json={"name": "canhoto.jpg", "mime_type": "image/jpeg", "size_bytes": 100, "origin": "UPLOAD_DIRETO"},
+        )
+        assert initiate.status_code == 201, initiate.text
+
+    async def test_disallowed_format_is_rejected_before_any_upload_url_is_issued(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+
+        initiate = await client.post(
+            "/api/v1/storage/uploads", headers=headers,
+            json={
+                "name": "script.exe", "mime_type": "application/x-msdownload", "size_bytes": 100,
+                "origin": "UPLOAD_DIRETO",
+            },
+        )
+        assert initiate.status_code == 400, initiate.text
+        assert initiate.json()["error"]["code"] == "STORAGE_UPLOAD_MIME_TYPE_NOT_ALLOWED"
+
+    async def test_declared_size_within_limit_succeeds(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+
+        initiate = await client.post(
+            "/api/v1/storage/uploads", headers=headers,
+            json={
+                "name": "documento.pdf", "mime_type": "application/pdf", "size_bytes": 1024,
+                "origin": "UPLOAD_DIRETO",
+            },
+        )
+        assert initiate.status_code == 201, initiate.text
+
+    async def test_declared_size_above_limit_is_rejected_before_any_upload_url_is_issued(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, _, _ = await _full_access_actor(client, tenants)
+        above_limit = 15 * 1024 * 1024 + 1  # UPLOAD_MAX_SIZE_BYTES default + 1 byte
+
+        initiate = await client.post(
+            "/api/v1/storage/uploads", headers=headers,
+            json={
+                "name": "gigante.pdf", "mime_type": "application/pdf", "size_bytes": above_limit,
+                "origin": "UPLOAD_DIRETO",
+            },
+        )
+        assert initiate.status_code == 400, initiate.text
+        assert initiate.json()["error"]["code"] == "STORAGE_UPLOAD_SIZE_NOT_ALLOWED"
+
+    async def test_real_upload_above_limit_is_rejected_at_confirm_even_if_declared_size_lied(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """A prova real: declara um tamanho pequeno (passa a Parte 1), mas envia um binário maior
+        que o limite de verdade — `commands/complete` precisa pegar isso a partir do tamanho real
+        devolvido pelo MinIO, não do que o cliente alegou."""
+
+        headers, _, _ = await _full_access_actor(client, tenants)
+        oversized_content = b"x" * (16 * 1024 * 1024)  # 16MB > default de 15MB
+
+        initiate = await client.post(
+            "/api/v1/storage/uploads", headers=headers,
+            json={
+                "name": "mentira.pdf", "mime_type": "application/pdf", "size_bytes": 100,
+                "origin": "UPLOAD_DIRETO",
+            },
+        )
+        assert initiate.status_code == 201, initiate.text
+        body = initiate.json()
+
+        async with httpx.AsyncClient(timeout=30.0) as minio_client:
+            put = await minio_client.put(body["upload_url"], content=oversized_content)
+        assert put.status_code in (200, 204), put.text
+
+        complete = await client.post(
+            f"/api/v1/storage/uploads/{body['file_id']}/commands/complete", headers=headers
+        )
+        assert complete.status_code == 409, complete.text
+        assert complete.json()["error"]["code"] == "STORAGE_UPLOAD_SIZE_EXCEEDS_LIMIT"
+
+        # Rejeitado — o Arquivo fica marcado EXCLUIDO (D219, mesmo soft-delete de sempre; metadado
+        # continua consultável, só não é mais um arquivo utilizável).
+        get_file = await client.get(f"/api/v1/storage/files/{body['file_id']}", headers=headers)
+        assert get_file.status_code == 200
+        assert get_file.json()["status"] == "EXCLUIDO"
+
+    async def test_tenant_isolation_holds_for_a_rejected_upload(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers_a, _, _ = await _full_access_actor(client, tenants)
+        headers_b, _, _ = await _full_access_actor(client, tenants)
+
+        above_limit = 15 * 1024 * 1024 + 1
+        rejected = await client.post(
+            "/api/v1/storage/uploads", headers=headers_a,
+            json={
+                "name": "gigante.pdf", "mime_type": "application/pdf", "size_bytes": above_limit,
+                "origin": "UPLOAD_DIRETO",
+            },
+        )
+        assert rejected.status_code == 400
+
+        # E um upload legítimo do tenant A nunca é visível ao tenant B.
+        legit = await client.post(
+            "/api/v1/storage/uploads", headers=headers_a,
+            json={"name": "canhoto.jpg", "mime_type": "image/jpeg", "size_bytes": 100, "origin": "UPLOAD_DIRETO"},
+        )
+        assert legit.status_code == 201, legit.text
+        file_id = legit.json()["file_id"]
+
+        cross_tenant_get = await client.get(f"/api/v1/storage/files/{file_id}", headers=headers_b)
+        assert cross_tenant_get.status_code == 404
 
 
 class TestAttachmentCommentAudits:

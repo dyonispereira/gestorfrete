@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from core.audit.audit_logger import AuditLogger
+from core.config.settings import get_settings
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
-from core.exceptions.base import NotFoundError
+from core.exceptions.base import NotFoundError, ValidationError
 from modules.storage.domain.entities.file import File
 from modules.storage.domain.value_objects.file_origin import FileOrigin
 from modules.storage.infrastructure.object_storage import (
+    ALLOWED_UPLOAD_MIME_TYPES,
     UPLOAD_URL_EXPIRY,
     build_storage_key,
     ensure_bucket_exists,
@@ -41,12 +43,33 @@ class UploadFileResultDTO:
 
 class UploadFileHandler(CommandHandler[UploadFileCommand, UploadFileResultDTO]):
     """`POST /storage/uploads` — D415: materializa a linha `arquivos` já aqui (status `ATIVO`), já
-    que o enum não tem um valor intermediário; `commands/complete` confirma/corrige."""
+    que o enum não tem um valor intermediário; `commands/complete` confirma/corrige.
+
+    Production Readiness Hardening, Parte 3 — valida `mime_type`/`size_bytes` aqui, ANTES de emitir
+    a URL assinada. Isso é a primeira camada de defesa, não a única: como o binário em si nunca passa
+    pela API (D314 — cliente envia direto ao Storage via URL assinada), um cliente malicioso pode
+    mentir sobre o tamanho declarado aqui. A segunda camada real, que confere o tamanho verdadeiro
+    devolvido pelo próprio MinIO, está em `CompleteFileUploadHandler`."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
 
     async def handle(self, command: UploadFileCommand) -> UploadFileResultDTO:
+        if command.mime_type not in ALLOWED_UPLOAD_MIME_TYPES:
+            raise ValidationError(
+                "STORAGE_UPLOAD_MIME_TYPE_NOT_ALLOWED",
+                f"Tipo de arquivo não permitido: '{command.mime_type}'. "
+                f"Formatos aceitos: {', '.join(sorted(ALLOWED_UPLOAD_MIME_TYPES))}.",
+            )
+
+        max_size = get_settings().upload_max_size_bytes
+        if command.size_bytes <= 0 or command.size_bytes > max_size:
+            raise ValidationError(
+                "STORAGE_UPLOAD_SIZE_NOT_ALLOWED",
+                f"Tamanho de arquivo inválido: {command.size_bytes} bytes "
+                f"(deve ser maior que zero e no máximo {max_size} bytes).",
+            )
+
         await ensure_bucket_exists()
 
         async with SQLAlchemyUnitOfWork() as uow:

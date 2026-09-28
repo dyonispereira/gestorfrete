@@ -13,6 +13,20 @@ BUCKET_NAME = "gestorfrete-files"
 UPLOAD_URL_EXPIRY = timedelta(minutes=15)
 DOWNLOAD_URL_EXPIRY = timedelta(minutes=15)
 
+# Production Readiness Hardening, Parte 3 — formatos operacionais reais do GestorFrete: evidência
+# fotográfica (canhoto/checklist), documento digitalizado (PDF) e XML fiscal (CT-e/MDF-e). Não uma
+# lista arbitrariamente restritiva nem arbitrariamente ampla — cada entrada corresponde a um uso
+# real já existente no fluxo documental, nunca "só para garantir".
+ALLOWED_UPLOAD_MIME_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "application/xml",
+        "text/xml",
+    }
+)
+
 
 def build_storage_key(tenant_id: uuid.UUID, file_id: uuid.UUID) -> str:
     """`{tenant_id}/{file_id}` — nunca o nome original (evita colisão/travessia de path); o nome
@@ -61,6 +75,21 @@ async def stat_object(storage_key: str) -> int | None:
             raise
 
     return await asyncio.to_thread(_stat)
+
+
+async def delete_object(storage_key: str) -> None:
+    """Remove o binário físico do Storage — usado só quando um upload precisa ser revertido de
+    verdade (ex.: `commands/complete` encontra o objeto acima do teto de tamanho permitido,
+    Production Readiness Hardening Parte 3). Nunca chamado pelo caminho normal de exclusão de
+    Arquivo (`DeleteFileHandler`, D219): esse é sempre soft-delete lógico, objeto físico intocado —
+    aqui é a exceção deliberada, para um upload que nunca deveria ter sido aceito."""
+
+    client = get_minio_client()
+
+    def _remove() -> None:
+        client.remove_object(BUCKET_NAME, storage_key)
+
+    await asyncio.to_thread(_remove)
 
 
 async def compute_object_hash(storage_key: str) -> str:

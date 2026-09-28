@@ -368,7 +368,7 @@ async def _consolidate_snapshot(
 async def _upload_file(client: AsyncClient, headers: dict[str, str], content: bytes) -> str:
     initiate = await client.post(
         "/api/v1/storage/uploads", headers=headers,
-        json={"name": "evidencia.txt", "mime_type": "text/plain", "size_bytes": len(content), "origin": "UPLOAD_DIRETO"},
+        json={"name": "evidencia.pdf", "mime_type": "application/pdf", "size_bytes": len(content), "origin": "UPLOAD_DIRETO"},
     )
     assert initiate.status_code == 201, initiate.text
     body = initiate.json()
