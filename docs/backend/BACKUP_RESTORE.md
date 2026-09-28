@@ -43,10 +43,41 @@ número de dias controlável via `GESTORFRETE_BACKUP_RETENTION_DAYS`.
 
 ## Localização/configuração por ambiente
 
-| Variável | Local (`docker-compose.yml`) | Produção (futura) |
+| Variável | Local (`docker-compose.yml`) | Produção |
 |---|---|---|
-| `GESTORFRETE_BACKUP_DIR` | `./backups` (bind mount, fora do volume `postgres_data`) | Bucket S3-compatible separado do banco — nunca no mesmo host físico do Postgres (backup que mora no mesmo disco que falha não é backup) |
-| `DATABASE_URL_SYNC` | `postgresql://gestorfrete:gestorfrete@localhost:5432/gestorfrete` | Lido de secret manager, nunca hardcoded — mesmo princípio já aplicado a `Settings.jwt_secret_key`/`database_url` (`core/config/settings.py`), que hoje só têm defaults fracos, sem guard de produção (gap relacionado, registrado no Go-Live Audit, não fechado por este documento) |
+| `GESTORFRETE_BACKUP_DIR` | `./backups` (bind mount, fora do volume `postgres_data`) | Diretório local no host de produção — só o primeiro salto; a cópia que sobrevive à perda do host é a externa, ver seção abaixo |
+| `DATABASE_URL_SYNC` | `postgresql://gestorfrete:gestorfrete@localhost:5432/gestorfrete` | Lido de secret manager/`.env.prod` (nunca commitado), nunca hardcoded — mesmo princípio agora aplicado a `Settings.jwt_secret_key`/`database_url` (`core/config/settings.py`), que a partir da Parte 1 do Production Readiness Hardening recusam startup com o default fraco de desenvolvimento em `ENVIRONMENT=production` |
+
+## Segunda localização — backup nunca só no mesmo servidor do Postgres
+
+Production Readiness Hardening, Parte 8 — fechado o gap que a rodada anterior deixou em aberto
+("Fora de escopo" abaixo). Script real:
+[`scripts/backup_offsite_copy.sh`](../../scripts/backup_offsite_copy.sh) `<caminho-do-dump>`,
+encadeado depois de `backup.sh`:
+
+```bash
+DUMP="$(ls -1t "${GESTORFRETE_BACKUP_DIR:-/var/backups/gestorfrete}"/gestorfrete_*.dump | head -1)"
+scripts/backup.sh && scripts/backup_offsite_copy.sh "${DUMP}"
+```
+
+Interface S3-compatível genérica (`aws s3 cp` + `--endpoint-url` opcional) — **não é uma dependência
+forte de AWS**: qualquer provedor com API S3-compatível funciona (Backblaze B2, DigitalOcean Spaces,
+Wasabi, um MinIO hospedado num host/conta diferente do Postgres, ou AWS S3 de verdade). Qual
+provedor usar é uma decisão de deploy (preencher `GESTORFRETE_OFFSITE_S3_BUCKET`/
+`GESTORFRETE_OFFSITE_S3_ENDPOINT`/credenciais), nunca hardcoded no script.
+
+Garantias, testadas de ponta a ponta nesta rodada contra um bucket real (MinIO local, como
+stand-in de um provedor S3-compatível externo):
+- **Falha de cópia externa retorna erro explícito** (`exit 1`), nunca silenciosa — testado com
+  credencial errada contra um bucket real: o `aws s3 cp` falha, o script captura e reporta.
+- **Nunca apaga o backup local antes de confirmar a cópia externa** — testado no mesmo cenário
+  acima: o arquivo local permaneceu intacto depois da falha.
+- **Verifica a cópia remota** (`aws s3 ls` no destino) antes de reportar sucesso — não confia
+  apenas no código de saída do `cp`.
+- Nenhuma credencial hardcoded — `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/bucket/endpoint são
+  sempre variáveis de ambiente, nunca valores no script.
+
+Template de configuração: [`infra/compose/.env.prod.example`](../../infra/compose/.env.prod.example).
 
 ## Procedimento de restore
 
