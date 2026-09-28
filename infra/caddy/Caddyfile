@@ -1,0 +1,29 @@
+# Production Readiness Hardening, Parte 5 — reverse proxy do piloto.
+#
+# Internet -> HTTPS 443 (Caddy, este arquivo) -> web/api/files, cada um só alcançável pela rede
+# Docker privada (nenhum dos três publica porta própria no host — ver docker-compose.prod.yml).
+#
+# Emissão/renovação de certificado é 100% automática (ACME/Let's Encrypt) — nenhum certificado
+# manual entra no repositório. DOMAIN e CADDY_ACME_EMAIL vêm de infra/compose/.env.prod (nunca
+# commitado; ver infra/compose/.env.prod.example).
+#
+# MinIO Console (9001), PostgreSQL (5432) e Redis (6379) deliberadamente NÃO têm bloco de site
+# aqui — não ficam acessíveis por este proxy nem por nenhuma porta pública.
+
+{
+	email {$CADDY_ACME_EMAIL}
+}
+
+app.{$DOMAIN} {
+	reverse_proxy web:3000
+}
+
+api.{$DOMAIN} {
+	reverse_proxy api:8000
+}
+
+# Só a API de dados do MinIO (porta 9000) — o upload via URL assinada (D314) faz o navegador falar
+# direto com o Storage; sem isso, todo upload/download do GestorFrete quebraria em produção.
+files.{$DOMAIN} {
+	reverse_proxy minio:9000
+}

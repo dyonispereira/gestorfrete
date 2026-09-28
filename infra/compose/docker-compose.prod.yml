@@ -1,0 +1,142 @@
+# Production Readiness Hardening, Parte 6 — compose de produção do piloto. Não é o compose de
+# desenvolvimento com portas removidas: é um arquivo próprio, para não arriscar dev/CI ao mudar
+# isso (docker-compose.yml, usado por infra/docker/*/Dockerfile e pelo job `e2e` do CI, continua
+# intocado).
+#
+# Diferenças deliberadas em relação ao compose de desenvolvimento:
+#   - RabbitMQ não sobe (Parte 2 — nenhum publisher/consumidor real existe hoje).
+#   - Nenhuma porta de Postgres/Redis/MinIO publicada no host — só alcançáveis pela rede Docker
+#     privada `internal`. MinIO ganha uma segunda rede (`edge`) só para o Caddy alcançá-lo; a porta
+#     em si nunca é publicada no host.
+#   - Caddy é o único serviço com porta publicada (443, +80 para o desafio ACME HTTP).
+#   - Sem defaults fracos: toda credencial usa `${VAR:?mensagem}` — sobe vazio, o compose falha
+#     imediatamente, antes mesmo do container tentar iniciar (defesa em profundidade com o guard de
+#     Settings da Parte 1, que pega o caso de a variável estar preenchida mas ainda assim ser um
+#     valor de desenvolvimento conhecido).
+#
+# Uso: docker compose -f infra/compose/docker-compose.prod.yml --env-file infra/compose/.env.prod up -d
+# `.env.prod` nunca é commitado — só `.env.prod.example`, com placeholders.
+
+name: gestorfrete-prod
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER precisa estar definido}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD precisa estar definido}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB precisa estar definido}
+    networks: [internal]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER precisa estar definido}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [internal]
+    # Sem volume deliberadamente — só guarda chave de idempotência (TTL de 24h); perder no restart
+    # é uma troca aceita, nunca listada como volume persistente exigido (Parte 6).
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER precisa estar definido}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD precisa estar definido}
+    networks: [internal, edge]
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER precisa estar definido}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD precisa estar definido}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB precisa estar definido}
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_ENABLED: "false"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER precisa estar definido}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD precisa estar definido}
+      MINIO_SECURE: "false"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY precisa estar definido, nunca change-me}"
+      CORS_ORIGINS: "${CORS_ORIGINS:?CORS_ORIGINS precisa estar definido, ex. https-app-SEU_DOMINIO}"
+    networks: [internal, edge]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL precisa estar definido, ex. https-api-SEU_DOMINIO}"
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: "${DOMAIN:?DOMAIN precisa estar definido, ex. pilot.gestorfrete.com.br}"
+      CADDY_ACME_EMAIL: "${CADDY_ACME_EMAIL:?CADDY_ACME_EMAIL precisa estar definido para renovacao de certificado}"
+    ports:
+      - "443:443"
+      - "80:80" # desafio ACME HTTP + redirect http->https automático do Caddy
+    networks: [edge]
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+networks:
+  # Postgres/Redis nunca entram em `edge` — inalcançáveis mesmo por outro container que só tenha
+  # acesso a `edge`, não só "não publicados no host".
+  internal:
+  edge:
+
+volumes:
+  postgres_data:
+  minio_data:
+  caddy_data:
+  caddy_config:

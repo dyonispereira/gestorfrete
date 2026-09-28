@@ -22,6 +22,9 @@ __pycache__/
 
 # Docker
 infra/compose/.env
+# Production Readiness Hardening, Parte 6/8 — segredos reais de produção/piloto nunca commitados;
+# só *.example entra no repositório.
+infra/compose/.env.prod
 
 # Editors / OS
 .vscode/
