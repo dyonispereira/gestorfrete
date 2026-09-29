@@ -180,7 +180,20 @@ async function closeWorkOrderWithHighValueItem(page: Page, itemValue: string) {
   await page.getByRole("dialog").getByRole("button", { name: "Concluir ordem de serviço" }).click();
   await expect(page.getByText("Ordem de serviço concluída.")).toBeVisible({ timeout: 10_000 });
 
-  await page.getByRole("button", { name: "Fechar" }).click();
+  // O toast sozinho já causou 1 falha intermitente em CI (timing/overlap, nunca reproduzido
+  // localmente — o comando sempre respondeu 200 em <40ms nas execuções locais). Mesmo padrão já
+  // usado acima nesta função (Diagnosticar/Concluir): esperar a resposta real do comando primeiro
+  // — evidência de que a OS fechou de fato — e só então validar o toast, que continua sendo
+  // checado, mas deixa de ser a única prova de que a operação terminou.
+  const [fecharResponse] = await Promise.all([
+    page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/commands/fechar")),
+    page.getByRole("button", { name: "Fechar" }).click(),
+  ]);
+  expect(fecharResponse.status()).toBe(200);
+  // Estado FECHADA é terminal — nenhum botão de comando renderiza mais (ver
+  // WorkOrderCommandsPanel). Sinal de UI mais estável que o toast: não depende de timer de
+  // auto-dismiss nem de quantos toasts estão empilhados no momento.
+  await expect(page.getByRole("button", { name: "Fechar" })).toBeHidden({ timeout: 10_000 });
   await expect(page.getByText("Ordem de serviço fechada.")).toBeVisible({ timeout: 10_000 });
 }
 
