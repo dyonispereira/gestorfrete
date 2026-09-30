@@ -9,6 +9,9 @@ from core.audit.audit_logger import AuditLogger
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError
 from modules.documents.application.commands.create_cte import CreateCteCommand, CreateCteHandler
+from modules.documents.infrastructure.persistence.repositories.sqlalchemy_fiscal_configuration_repository import (
+    SqlAlchemyFiscalConfigurationRepository,
+)
 from modules.drivers.infrastructure.persistence.repositories.sqlalchemy_driver_repository import (
     SqlAlchemyDriverRepository,
 )
@@ -49,15 +52,32 @@ class DispatchTripCommand(Command):
 class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
     """`commands/dispatch`/`commands/start` — mesma transição (`LIBERADA→EM_DESLOCAMENTO`), `origin`
     diferente gravado no histórico. D378 — momento em que `nome_motorista_snapshot`/
-    `placa_veiculo_snapshot` são congelados pela primeira e única vez. D396 — dispara a criação
-    automática do CT-e (`documents`), chamada depois que esta própria transação já commitou (mesmo
-    formato "consumidor futuro de evento, síncrono" de D247/D375/D390, primeira vez na direção
-    `freight`→`documents`). Mesma chamada síncrona pós-commit agora também abre o impedimento
-    `VIAGEM` em `fleet` (`VehicleAvailabilityProjector.apply_trip_dispatched`) — lado que faltava
-    do projetor de Disponibilidade, só o lado `maintenance` estava conectado até aqui. V1
-    Operational Hardening, Parte 2 — `hodometro_saida_km` (opcional) grava a leitura de fronteira
-    de despacho via `TripOdometerRecorder` (`fleet`, D034); omitido, a Viagem simplesmente não
-    entra no cálculo de `km_rodado` depois — nunca estimado."""
+    `placa_veiculo_snapshot` são congelados pela primeira e única vez. D396 — toda Viagem
+    despachada tem um CT-e correspondente.
+
+    Hotfix P0 (Gate 6, incidente `VG-2026-6574BB`) — a criação do CT-e costumava rodar DEPOIS
+    desta transação já ter commitado (`CreateCteHandler` abria sua própria UoW). Quando faltava
+    `FiscalConfig` (ou qualquer outra falha ali), a Viagem já tinha transicionado
+    `LIBERADA→EM_DESLOCAMENTO` de forma permanente e irreversível pela API normal — sem CT-e, sem
+    caminho de retry (o domínio corretamente rejeita um segundo `dispatch()` a partir de
+    `EM_DESLOCAMENTO`), e a `Idempotency-Key` da tentativa original era liberada pelo
+    `IdempotencyStore` (a falha não deixa marca), então um retry com a mesma key batia num erro de
+    domínio totalmente diferente do erro real. Agora: (1) `FiscalConfig` é validada ANTES de
+    `trip.dispatch()` — fail-fast, nenhuma mutação em memória acontece se o pré-requisito não
+    existir; (2) a criação do CT-e roda DENTRO desta mesma `uow`/transação, não mais como uma
+    segunda transação separada — um único `uow.commit()` no final cobre Viagem + histórico +
+    auditoria + CT-e + contador fiscal juntos. Qualquer falha em qualquer um desses passos causa
+    rollback integral: a Viagem permanece `LIBERADA`, nenhum CT-e é persistido, e o contador
+    `proximo_numero_cte` não é consumido (nunca decrementado/perdido em caso de falha).
+
+    Os efeitos abaixo continuam DELIBERADAMENTE fora desta transação — não são obrigações legais
+    como o CT-e, são projeções/dados derivados: `VehicleAvailabilityProjector.apply_trip_dispatched`
+    é idempotente por design (`get_active` antes de `create`, sempre recomputa do zero a partir dos
+    impedimentos ativos — uma falha aqui é segura para reconciliar depois) e
+    `TripOdometerRecorder.record_departure` já é tratado como opcional pelo próprio domínio
+    (`hodometro_saida_km` ausente é um caso normal, nunca estimado). Uma falha em qualquer um dos
+    dois AINDA pode produzir "HTTP erro + Viagem despachada com sucesso" — risco residual
+    conhecido e registrado como dívida arquitetural separada, fora do escopo deste hotfix."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -71,10 +91,17 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
             vehicle_repo = SqlAlchemyVehicleRepository(uow.session)
             user_repo = SqlAlchemyUserRepository(uow.session)
             allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
+            fiscal_config_repo = SqlAlchemyFiscalConfigurationRepository(uow.session)
 
             trip = await trip_repo.get_by_id(command.trip_id)
             if trip is None:
                 raise NotFoundError("FREIGHT_TRIP_NOT_FOUND", "Viagem não encontrada.")
+
+            # Fail-fast (Hotfix P0, Fase A): valida o pré-requisito fiscal ANTES de qualquer
+            # mutação da Viagem. Não substitui a atomicidade da Fase B abaixo — só evita o caso
+            # mais comum (config nunca cadastrada) sem sequer tocar a entidade em memória.
+            if await fiscal_config_repo.get_for_tenant_locked() is None:
+                raise NotFoundError("FISCAL_CONFIG_NOT_FOUND", "Configuração Fiscal do tenant não encontrada.")
 
             driver = await driver_repo.get_by_id(trip.motorista_id) if trip.motorista_id else None
             vehicle = await vehicle_repo.get_by_id(trip.veiculo_tracionador_id) if trip.veiculo_tracionador_id else None
@@ -122,9 +149,13 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
                         mensagem=f"A viagem {trip.codigo} foi despachada e está pronta para deslocamento.", now=now,
                     )
 
-            await uow.commit()
+            # Fase B — CT-e na MESMA transação: falha aqui reverte a Viagem também (rollback
+            # integral via __aexit__ da própria `uow`, nenhum commit intermediário acontece).
+            await CreateCteHandler().handle_in_transaction(
+                CreateCteCommand(actor=command.actor, trip_id=trip.id), uow=uow
+            )
 
-        await CreateCteHandler().handle(CreateCteCommand(actor=command.actor, trip_id=trip.id))
+            await uow.commit()
 
         if trip.veiculo_tracionador_id is not None:
             await VehicleAvailabilityProjector().apply_trip_dispatched(
