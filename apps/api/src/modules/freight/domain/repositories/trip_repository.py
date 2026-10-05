@@ -11,6 +11,17 @@ from shared_kernel.domain.repository import Repository
 
 class TripRepository(Repository[Trip, uuid.UUID]):
     @abstractmethod
+    async def get_by_id_for_update(self, id: uuid.UUID) -> Trip | None:
+        """`SELECT ... FOR UPDATE` na linha da Viagem — mesmo padrão de
+        `FiscalConfigurationRepository.get_for_tenant_locked()` (D399). Hotfix P0 Fase 2 (Gate 6) —
+        `get_by_id()` comum nunca bloqueia, então duas transações concorrentes podiam ambas ler a
+        Viagem como `LIBERADA` antes de qualquer uma commitar, e a segunda nunca relia o estado
+        real ao finalmente prosseguir, duplicando o despacho/CT-e. Reservado para comandos mutáveis
+        críticos que precisam serializar contra escrita concorrente na mesma Viagem — não para todo
+        `get_by_id()`, que continua sem lock para leituras comuns."""
+        ...
+
+    @abstractmethod
     async def list_page(
         self,
         *,

@@ -77,7 +77,24 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
     `TripOdometerRecorder.record_departure` já é tratado como opcional pelo próprio domínio
     (`hodometro_saida_km` ausente é um caso normal, nunca estimado). Uma falha em qualquer um dos
     dois AINDA pode produzir "HTTP erro + Viagem despachada com sucesso" — risco residual
-    conhecido e registrado como dívida arquitetural separada, fora do escopo deste hotfix."""
+    conhecido e registrado como dívida arquitetural separada, fora do escopo deste hotfix.
+
+    Hotfix P0 Fase 2 — a Fase 1 acima resolve atomicidade (uma tentativa nunca deixa efeito
+    parcial), mas o CI real expôs uma classe separada de bug: `get_by_id()` comum nunca bloqueia,
+    então DUAS tentativas concorrentes (ex.: `commands/dispatch` pelo portal do gestor e
+    `commands/start` pelo app do motorista quase simultaneamente — os dois caem neste mesmo
+    handler, só com `origin` diferente) podiam ambas ler a Viagem como `LIBERADA` antes de
+    qualquer commit, produzindo 2 CT-es para a mesma Viagem — reproduzido deterministicamente
+    (não por sorte de timing) antes desta correção. Agora `get_by_id_for_update()` (`SELECT ...
+    FOR UPDATE`, mesmo padrão de `FiscalConfigurationRepository.get_for_tenant_locked()`) é
+    adquirido já na primeira leitura, antes de qualquer checagem — a segunda transação bloqueia
+    ali, e ao prosseguir enxerga o estado real já atualizado, então `trip.dispatch()` corretamente
+    rejeita a segunda tentativa. Só o `DispatchTripHandler` foi alterado — outras transições da
+    Viagem (`finish`, `cancelar`, `interromper`/`retomar`, `accept`, `mark_collected`,
+    `mark_manifest_checked`) continuam sem lock, auditadas mas não corrigidas nesta rodada (nenhuma
+    delas encadeia um efeito colateral obrigatório cross-module como o CT-e, e nenhuma converge
+    dois endpoints/atores diferentes no mesmo método como `dispatch`/`start` — risco real menor,
+    registrado como dívida arquitetural separada)."""
 
     def __init__(self, audit_logger: AuditLogger | None = None) -> None:
         self._audit = audit_logger or AuditLogger()
@@ -93,13 +110,18 @@ class DispatchTripHandler(CommandHandler[DispatchTripCommand, TripDTO]):
             allocation_repo = SqlAlchemyTripAllocationRepository(uow.session)
             fiscal_config_repo = SqlAlchemyFiscalConfigurationRepository(uow.session)
 
-            trip = await trip_repo.get_by_id(command.trip_id)
+            # Hotfix P0 Fase 2 (Gate 6) — lock pessimista explícito, adquirido ANTES de qualquer
+            # checagem/mutação. Uma segunda transação concorrente tentando despachar a MESMA
+            # Viagem bloqueia aqui (não mais silenciosamente lendo um snapshot obsoleto) e, ao
+            # finalmente prosseguir, enxerga o estado já atualizado pela primeira — o domínio volta
+            # a decidir a transição sobre o estado real, não sobre memória desatualizada.
+            trip = await trip_repo.get_by_id_for_update(command.trip_id)
             if trip is None:
                 raise NotFoundError("FREIGHT_TRIP_NOT_FOUND", "Viagem não encontrada.")
 
-            # Fail-fast (Hotfix P0, Fase A): valida o pré-requisito fiscal ANTES de qualquer
-            # mutação da Viagem. Não substitui a atomicidade da Fase B abaixo — só evita o caso
-            # mais comum (config nunca cadastrada) sem sequer tocar a entidade em memória.
+            # Fail-fast (Hotfix P0 Fase 1): valida o pré-requisito fiscal ANTES de qualquer mutação
+            # da Viagem. Não substitui a atomicidade da Fase B abaixo — só evita o caso mais comum
+            # (config nunca cadastrada) sem sequer tocar a entidade em memória.
             if await fiscal_config_repo.get_for_tenant_locked() is None:
                 raise NotFoundError("FISCAL_CONFIG_NOT_FOUND", "Configuração Fiscal do tenant não encontrada.")
 

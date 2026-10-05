@@ -72,6 +72,16 @@ class SqlAlchemyTripRepository(TripRepository):
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         return _to_entity(model) if model is not None else None
 
+    async def get_by_id_for_update(self, id: uuid.UUID) -> Trip | None:
+        tenant_id = get_current_tenant_id()
+        stmt = (
+            select(TripModel)
+            .where(TripModel.id == id, TripModel.tenant_id == tenant_id, TripModel.excluido_em.is_(None))
+            .with_for_update()
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(model) if model is not None else None
+
     async def client_exists(self, cliente_id: uuid.UUID) -> bool:
         tenant_id = get_current_tenant_id()
         stmt = select(ClientModel.id).where(

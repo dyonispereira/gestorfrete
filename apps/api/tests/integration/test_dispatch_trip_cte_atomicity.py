@@ -19,6 +19,9 @@ from modules.documents.infrastructure.persistence.models.fiscal_configuration_mo
 from modules.fleet.infrastructure.persistence.models.odometer_reading_model import OdometerReadingModel
 from modules.freight.infrastructure.persistence.models.trip_model import TripModel
 from modules.freight.application.trip_internal_transitions import TripInternalTransitions
+from modules.freight.infrastructure.persistence.repositories.sqlalchemy_trip_repository import (
+    SqlAlchemyTripRepository,
+)
 
 # Reaproveita os helpers de domínio já validados em test_fiscal_flow.py (mesma infra, mesmo
 # padrão de tenant/role/user/client/driver/vehicle) — só as fixtures pytest (client/tenants/
@@ -156,6 +159,41 @@ async def _proximo_numero_cte(tenant_id: uuid.UUID) -> int:
         return int(row)
 
 
+async def _dispatch_concurrently_synced(
+    client: AsyncClient, trip_id: str, headers_a: dict[str, str], headers_b: dict[str, str]
+) -> list[int]:
+    """Força duas requisições de dispatch a lerem a Viagem ANTES de qualquer uma commitar —
+    reprodução determinística da corrida real que o CI encontrou (Hotfix P0 Fase 2), não
+    dependente de timing de rede/scheduler. Sincroniza no ponto exato onde a corrida acontece
+    (`SqlAlchemyTripRepository.get_by_id_for_update`, chamado no início do `DispatchTripHandler`):
+    a 1ª chamada espera a 2ª também ter entrado na leitura antes de qualquer uma prosseguir —
+    depois disso, a execução real decide (com o lock pessimista, só uma consegue avançar por vez,
+    e a segunda relê o estado já atualizado ao ser liberada)."""
+
+    original = SqlAlchemyTripRepository.get_by_id_for_update
+    first_read_started = asyncio.Event()
+    both_can_proceed = asyncio.Event()
+    state = {"count": 0}
+
+    async def instrumented(self_repo: SqlAlchemyTripRepository, id: uuid.UUID) -> object:
+        state["count"] += 1
+        n = state["count"]
+        if n == 1:
+            first_read_started.set()
+            await both_can_proceed.wait()
+        elif n == 2:
+            await first_read_started.wait()
+            both_can_proceed.set()
+        return await original(self_repo, id)
+
+    with patch.object(SqlAlchemyTripRepository, "get_by_id_for_update", instrumented):
+        responses = await asyncio.gather(
+            client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers_a),
+            client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers_b),
+        )
+    return [r.status_code for r in responses]
+
+
 class TestDispatchTripCteAtomicity:
     async def test_fiscal_config_ausente_falha_antes_de_qualquer_mutacao(
         self, client: AsyncClient, tenants: list[uuid.UUID], permission_ids: dict[str, uuid.UUID]
@@ -234,25 +272,45 @@ class TestDispatchTripCteAtomicity:
         assert second.json()["error"]["code"] == "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH"
         assert await _cte_count_for_trip(tenant_id, trip_id) == 1
 
-    async def test_concorrencia_nao_cria_dois_ctes(
+    async def test_concorrencia_keys_diferentes_apenas_uma_transicao_valida(
         self, client: AsyncClient, tenants: list[uuid.UUID], permission_ids: dict[str, uuid.UUID]
     ) -> None:
-        """(8) concorrência real (sem Idempotency-Key) não cria dois CT-es para a mesma Viagem —
-        garantida pelo `SELECT ... FOR UPDATE` em `FiscalConfiguration`, agora dentro da mesma
-        transação da Viagem."""
+        """(8) Hotfix P0 Fase 2 — duas requisições simultâneas com Idempotency-Keys DIFERENTES
+        (cenário real plausível: portal do gestor e app do motorista despachando a mesma Viagem
+        quase ao mesmo tempo). Reprodução determinística, não dependente de timing de rede — antes
+        da Fase 2 isto reproduzia [200, 200] e 2 CT-es de forma 100% confiável."""
 
         headers, tenant_id, category_id = await _full_access_actor(client, tenants)
         trip_id = await _create_trip_ready_to_dispatch(client, headers, tenant_id, category_id)
+        numero_antes = await _proximo_numero_cte(tenant_id)
 
-        responses = await asyncio.gather(
-            client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers),
-            client.post(f"/api/v1/viagens/{trip_id}/commands/dispatch", headers=headers),
-            return_exceptions=True,
-        )
-        statuses = [r.status_code for r in responses if not isinstance(r, BaseException)]
+        headers_a = {**headers, "Idempotency-Key": f"conc-a-{uuid.uuid4()}"}
+        headers_b = {**headers, "Idempotency-Key": f"conc-b-{uuid.uuid4()}"}
+        statuses = await _dispatch_concurrently_synced(client, trip_id, headers_a, headers_b)
 
-        assert statuses.count(200) == 1, f"esperava exatamente 1 sucesso, obteve {statuses}"
+        assert sorted(statuses) == [200, 409], f"esperava [200, 409], obteve {statuses}"
         assert await _cte_count_for_trip(tenant_id, trip_id) == 1
+        assert await _proximo_numero_cte(tenant_id) == numero_antes + 1
+        assert await _trip_status(tenant_id, trip_id) == "EM_DESLOCAMENTO"
+
+    async def test_concorrencia_sem_idempotency_key_apenas_uma_transicao_valida(
+        self, client: AsyncClient, tenants: list[uuid.UUID], permission_ids: dict[str, uuid.UUID]
+    ) -> None:
+        """(8) mesma corrida, mas sem NENHUMA Idempotency-Key — o endpoint aceita a requisição sem
+        key (`with_idempotency` pula toda a lógica de idempotência nesse caso), então a única
+        proteção real contra duplicação é o lock pessimista da Fase 2, não a camada de
+        idempotência. Antes da correção, reproduzia [200, 200] + 2 CT-es igual ao cenário com keys
+        diferentes — idempotência e controle de concorrência são garantias distintas."""
+
+        headers, tenant_id, category_id = await _full_access_actor(client, tenants)
+        trip_id = await _create_trip_ready_to_dispatch(client, headers, tenant_id, category_id)
+        numero_antes = await _proximo_numero_cte(tenant_id)
+
+        statuses = await _dispatch_concurrently_synced(client, trip_id, headers, headers)
+
+        assert sorted(statuses) == [200, 409], f"esperava [200, 409], obteve {statuses}"
+        assert await _cte_count_for_trip(tenant_id, trip_id) == 1
+        assert await _proximo_numero_cte(tenant_id) == numero_antes + 1
         assert await _trip_status(tenant_id, trip_id) == "EM_DESLOCAMENTO"
 
     async def test_falha_durante_criacao_do_cte_reverte_viagem_e_contador(
