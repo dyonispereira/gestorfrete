@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import date, datetime, timezone
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -209,6 +211,22 @@ async def _full_access_actor(client: AsyncClient, tenants: list[uuid.UUID]) -> t
     _, email = await _create_user(tenant_id, role_ids=frozenset({role_id}))
     headers = await _login(client, email)
     return headers, tenant_id, category_id
+
+
+async def _actor_without_fiscal_config(
+    client: AsyncClient, tenants: list[uuid.UUID], *, permission_codes: list[str] | None = None
+) -> tuple[dict[str, str], uuid.UUID]:
+    """GAP P1 — mesmo padrão de `_full_access_actor`, mas sem `_seed_fiscal_configuration`: o tenant
+    nasce deliberadamente sem `FiscalConfiguration`, para testar o bootstrap (`POST
+    /configuracao-fiscal`). `permission_codes=None` usa todas as permissões (caminho feliz);
+    uma lista vazia/parcial testa o guard de RBAC."""
+
+    tenant_id = await _create_tenant()
+    tenants.append(tenant_id)
+    role_id = await _create_role(tenant_id, permission_codes if permission_codes is not None else ALL_PERMISSION_CODES)
+    _, email = await _create_user(tenant_id, role_ids=frozenset({role_id}))
+    headers = await _login(client, email)
+    return headers, tenant_id
 
 
 async def _cleanup_tenant(tenant_id: uuid.UUID) -> None:
@@ -934,3 +952,232 @@ class TestTenantIsolation:
         cross_tenant = await client.get(f"/api/v1/ctes/{cte['id']}", headers=headers_a)
         assert cross_tenant.status_code == 404
         assert cross_tenant.json()["error"]["code"] == "FISCAL_CTE_NOT_FOUND"
+
+
+def _valid_create_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "certificate_file_id": str(uuid.uuid4()),
+        "certificate_expires_at": "2030-01-01",
+        "environment": "HOMOLOGACAO",
+        "tax_regime": "SIMPLES",
+        "cte_series": "1",
+        "mdfe_series": "1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+async def _create_concurrently_synced(client: AsyncClient, headers: dict[str, str]) -> list[int]:
+    """GAP P1 — reprodução determinística da corrida de criação (não timing de rede): não existe
+    linha para `FOR UPDATE` travar quando a config ainda não existe (ao contrário do dispatch da
+    Viagem), então sincroniza no ponto real da corrida — a checagem `get_for_tenant()` dentro do
+    Handler — forçando as duas tentativas a lerem `None` antes de qualquer uma commitar. A defesa
+    real contra duplicar fica por conta da constraint `uq_configuracoes_fiscais_tenant_id`."""
+
+    from modules.documents.infrastructure.persistence.repositories.sqlalchemy_fiscal_configuration_repository import (
+        SqlAlchemyFiscalConfigurationRepository,
+    )
+
+    original = SqlAlchemyFiscalConfigurationRepository.get_for_tenant
+    first_read_started = asyncio.Event()
+    both_can_proceed = asyncio.Event()
+    state = {"count": 0}
+
+    async def instrumented(self_repo: Any) -> Any:
+        state["count"] += 1
+        n = state["count"]
+        if n == 1:
+            first_read_started.set()
+            await both_can_proceed.wait()
+        elif n == 2:
+            await first_read_started.wait()
+            both_can_proceed.set()
+        return await original(self_repo)
+
+    with patch.object(SqlAlchemyFiscalConfigurationRepository, "get_for_tenant", instrumented):
+        responses = await asyncio.gather(
+            client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload()),
+            client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload()),
+        )
+    return [r.status_code for r in responses]
+
+
+class TestCreateFiscalConfiguration:
+    """GAP P1 (Gate 6) — `POST /configuracao-fiscal`, bootstrap explícito da configuração fiscal
+    do tenant. Descoberto validando o Hotfix P0 (dispatch/CT-e) no ambiente TEST publicado: um
+    tenant novo não tinha nenhum caminho legítimo de API para chegar ao primeiro despacho."""
+
+    async def test_cria_quando_tenant_nao_possui_configuracao(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+
+        response = await client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload())
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["next_cte_number"] == 1
+        assert body["next_mdfe_number"] == 1
+        assert body["status"] == "ATIVA"
+
+    async def test_get_subsequente_retorna_a_configuracao_criada(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+        created = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload(tax_regime="SIMPLES")
+        )
+        assert created.status_code == 201, created.text
+
+        fetched = await client.get("/api/v1/configuracao-fiscal", headers=headers)
+
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["id"] == created.json()["id"]
+        assert fetched.json()["tax_regime"] == "SIMPLES"
+
+    async def test_segundo_post_retorna_conflito_sem_sobrescrever(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+        first = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload(tax_regime="SIMPLES")
+        )
+        assert first.status_code == 201, first.text
+
+        second = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload(tax_regime="LUCRO_REAL")
+        )
+
+        assert second.status_code == 409, second.text
+        assert second.json()["error"]["code"] == "FISCAL_CONFIG_ALREADY_EXISTS"
+        # nunca sobrescreveu — o valor original permanece
+        still = await client.get("/api/v1/configuracao-fiscal", headers=headers)
+        assert still.json()["tax_regime"] == "SIMPLES"
+
+    async def test_patch_continua_funcionando_apos_post(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+        created = await client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload())
+        assert created.status_code == 201, created.text
+
+        patched = await client.patch("/api/v1/configuracao-fiscal", headers=headers, json={"cte_series": "9"})
+
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["cte_series"] == "9"
+
+    async def test_sem_permissao_edit_retorna_403(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(
+            client, tenants, permission_codes=["documents.fiscal_config.view"]
+        )
+
+        response = await client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload())
+
+        assert response.status_code == 403, response.text
+
+    async def test_tenant_a_nao_ve_nem_altera_config_do_tenant_b(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers_a, _ = await _actor_without_fiscal_config(client, tenants)
+        headers_b, _ = await _actor_without_fiscal_config(client, tenants)
+
+        created_a = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers_a, json=_valid_create_payload(tax_regime="SIMPLES")
+        )
+        created_b = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers_b, json=_valid_create_payload(tax_regime="LUCRO_PRESUMIDO")
+        )
+        assert created_a.status_code == 201, created_a.text
+        assert created_b.status_code == 201, created_b.text
+        assert created_a.json()["id"] != created_b.json()["id"]
+
+        get_a = await client.get("/api/v1/configuracao-fiscal", headers=headers_a)
+        get_b = await client.get("/api/v1/configuracao-fiscal", headers=headers_b)
+        assert get_a.json()["tax_regime"] == "SIMPLES"
+        assert get_b.json()["tax_regime"] == "LUCRO_PRESUMIDO"
+
+    async def test_campo_invalido_retorna_erro_de_validacao(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """`environment` fora de `HOMOLOGACAO`/`PRODUCAO` é rejeitado pelo Pydantic antes de
+        qualquer persistência — nunca chega a tocar o banco. O exception handler padrão da API
+        converte `RequestValidationError` em `400 VALIDATION_FAILED` (não o `422` cru do FastAPI —
+        confirmado como o padrão real já usado em toda a aplicação, não um comportamento novo
+        introduzido aqui)."""
+
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+
+        response = await client.post(
+            "/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload(environment="INVALIDO")
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["error"]["code"] == "VALIDATION_FAILED"
+
+    async def test_resposta_nao_vaza_campo_fora_do_contrato(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+
+        response = await client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload())
+
+        expected_fields = {
+            "id", "certificate_file_id", "certificate_expires_at", "environment", "tax_regime",
+            "cte_series", "next_cte_number", "mdfe_series", "next_mdfe_number", "status",
+        }
+        assert set(response.json().keys()) == expected_fields
+
+    async def test_criacao_habilita_dispatch_regressao_fluxo_fiscal(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """Regressão fim-a-fim: tenant nasce sem FiscalConfig, cria via POST, e consegue despachar
+        uma Viagem e emitir CT-e normalmente — o próprio cenário que motivou este gap."""
+
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+        category_id = await _seed_vehicle_category(tenant_id)
+        created = await client.post("/api/v1/configuracao-fiscal", headers=headers, json=_valid_create_payload())
+        assert created.status_code == 201, created.text
+
+        trip_id = await _create_and_dispatch_trip(client, headers, tenant_id, category_id)
+        cte = await _get_cte_for_trip(client, headers, trip_id)
+        assert cte["number"] == "1"
+
+    async def test_concorrencia_criacao_mesma_tenant_apenas_um_sucesso(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers, tenant_id = await _actor_without_fiscal_config(client, tenants)
+
+        statuses = await _create_concurrently_synced(client, headers)
+
+        assert sorted(statuses) == [201, 409], f"esperava [201, 409], obteve {statuses}"
+        assert statuses.count(500) == 0
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            from modules.documents.infrastructure.persistence.models.fiscal_configuration_model import (
+                FiscalConfigurationModel,
+            )
+
+            rows = (
+                await session.execute(
+                    select(FiscalConfigurationModel).where(FiscalConfigurationModel.tenant_id == tenant_id)
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].proximo_numero_cte == 1
+            assert rows[0].proximo_numero_mdfe == 1
+
+    async def test_tenants_diferentes_criam_independentemente(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        headers_a, tenant_a = await _actor_without_fiscal_config(client, tenants)
+        headers_b, tenant_b = await _actor_without_fiscal_config(client, tenants)
+
+        created_a = await client.post("/api/v1/configuracao-fiscal", headers=headers_a, json=_valid_create_payload())
+        created_b = await client.post("/api/v1/configuracao-fiscal", headers=headers_b, json=_valid_create_payload())
+
+        assert created_a.status_code == 201, created_a.text
+        assert created_b.status_code == 201, created_b.text
+        assert created_a.json()["id"] != created_b.json()["id"]

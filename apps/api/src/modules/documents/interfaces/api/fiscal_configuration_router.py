@@ -5,6 +5,10 @@ from fastapi import APIRouter, Depends
 from core.database.session import get_session_factory
 from core.exceptions.base import AuthorizationError
 from interfaces.dependencies.auth import get_current_actor
+from modules.documents.application.commands.create_fiscal_configuration import (
+    CreateFiscalConfigurationCommand,
+    CreateFiscalConfigurationHandler,
+)
 from modules.documents.application.commands.update_fiscal_configuration import (
     UpdateFiscalConfigurationCommand,
     UpdateFiscalConfigurationHandler,
@@ -17,6 +21,7 @@ from modules.documents.domain.value_objects.fiscal_configuration_environment imp
     FiscalConfigurationEnvironment,
 )
 from modules.documents.interfaces.schemas.fiscal_configuration_schemas import (
+    CreateFiscalConfigurationRequest,
     FiscalConfigurationResponse,
     UpdateFiscalConfigurationRequest,
 )
@@ -48,6 +53,28 @@ async def get_fiscal_configuration(
 ) -> FiscalConfigurationResponse:
     handler = GetFiscalConfigurationHandler(get_session_factory())
     dto = await handler.handle(GetFiscalConfigurationQuery(actor=actor))
+    return FiscalConfigurationResponse.from_dto(dto)
+
+
+@router.post("", response_model=FiscalConfigurationResponse, status_code=201)
+async def create_fiscal_configuration(
+    body: CreateFiscalConfigurationRequest,
+    actor: AuthenticatedActor = Depends(require_permission("documents.fiscal_config.edit")),
+) -> FiscalConfigurationResponse:
+    """GAP P1 (Gate 6) — criação inicial explícita, nunca um upsert do `PATCH`. Reutiliza
+    `documents.fiscal_config.edit` (decisão aprovada: criar uma permissão `.create` dedicada
+    exigiria migration de seed RBAC sem trazer separação de responsabilidade relevante para o
+    piloto — o agregado é singular por tenant, `edit` já representa a autoridade de configurar os
+    dados fiscais gerais)."""
+
+    handler = CreateFiscalConfigurationHandler()
+    dto = await handler.handle(
+        CreateFiscalConfigurationCommand(
+            actor=actor, certificate_file_id=body.certificate_file_id,
+            certificate_expires_at=body.certificate_expires_at, environment=body.environment,
+            regime_tributario=body.tax_regime, cte_series=body.cte_series, mdfe_series=body.mdfe_series,
+        )
+    )
     return FiscalConfigurationResponse.from_dto(dto)
 
 

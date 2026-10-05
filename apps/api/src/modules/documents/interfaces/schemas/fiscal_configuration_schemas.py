@@ -6,6 +6,9 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict
 
 from modules.documents.application.dtos.fiscal_configuration_dto import FiscalConfigurationDTO
+from modules.documents.domain.value_objects.fiscal_configuration_environment import (
+    FiscalConfigurationEnvironment,
+)
 
 
 class FiscalConfigurationResponse(BaseModel):
@@ -42,3 +45,19 @@ class UpdateFiscalConfigurationRequest(BaseModel):
     cte_series: str | None = None
     mdfe_series: str | None = None
     environment: str | None = None
+
+
+class CreateFiscalConfigurationRequest(BaseModel):
+    """GAP P1 (Gate 6) — bootstrap explícito: `POST` cria a única `FiscalConfiguration` do tenant.
+    Nunca upsert via `PATCH` (`UpdateFiscalConfigurationHandler` já exige que a config exista).
+    `environment` tipado como o enum de domínio, não `str` livre — valor fora de
+    `HOMOLOGACAO`/`PRODUCAO` já vira `422` pelo próprio Pydantic, antes de qualquer persistência."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    certificate_file_id: uuid.UUID
+    certificate_expires_at: date
+    environment: FiscalConfigurationEnvironment
+    tax_regime: str
+    cte_series: str
+    mdfe_series: str
