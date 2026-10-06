@@ -80,6 +80,24 @@ class SqlAlchemyUserRepository(UserRepository):
         stmt = select(UserModel.id).where(UserModel.tenant_id == tenant_id, UserModel.email == email)
         return (await self._session.execute(stmt)).first() is not None
 
+    async def get_by_email_in_tenant_for_update(self, email: str) -> User | None:
+        # Deliberadamente SEM `excluido_em.is_(None)` (diferente de todo outro método deste
+        # repositório): `User.deactivate()` grava `excluido_em` (soft delete) junto com
+        # `status=INATIVO` — se este método escondesse soft-deleted, o CLI de reset nunca
+        # conseguiria distinguir "usuário não existe" de "usuário existe mas está INATIVO", e
+        # devolveria sempre "não encontrado", violando o requisito explícito de reportar o status
+        # real antes de recusar (GAP IDENTITY, Gate 6).
+        tenant_id = get_current_tenant_id()
+        stmt = (
+            select(UserModel)
+            .where(UserModel.tenant_id == tenant_id, UserModel.email == email)
+            .with_for_update()
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        return _to_entity(model, await self._role_ids_for(model.id))
+
     async def get_by_driver_id_and_tenant(self, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> User | None:
         stmt = select(UserModel).where(
             UserModel.motorista_id == driver_id, UserModel.tenant_id == tenant_id, UserModel.excluido_em.is_(None)

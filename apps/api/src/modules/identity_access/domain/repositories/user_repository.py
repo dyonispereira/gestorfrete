@@ -18,6 +18,21 @@ class UserRepository(Repository[User, uuid.UUID]):
     async def exists_with_email(self, email: str) -> bool: ...
 
     @abstractmethod
+    async def get_by_email_in_tenant_for_update(self, email: str) -> User | None:
+        """GAP IDENTITY (Gate 6) — ao contrário de `get_by_email` (D208's exceção, busca global
+        usada só pelo login), este método é sempre escopado pelo tenant em contexto
+        (`get_current_tenant_id()`), igual a todo outro método deste repositório. Existe para o CLI
+        `reset_user_password.py`: localizar o usuário de forma inequívoca (tenant + email, nunca
+        e-mail sozinho — ver achado do bug latente em `get_by_email` com e-mail duplicado entre
+        tenants, GAP separado, não corrigido aqui) e travar a linha (`FOR UPDATE`, mesmo padrão de
+        `TripRepository.get_by_id_for_update`, Hotfix P0 Fase 2) contra duas operações de reset
+        concorrentes sobre o mesmo usuário. Deliberadamente não filtra soft-deleted
+        (`excluido_em`) — ao contrário de todo outro método deste repositório — porque
+        `User.deactivate()` soft-deleta junto com `status=INATIVO`, e o CLI precisa localizar o
+        usuário mesmo inativo para recusar o reset informando o status real, nunca um genérico
+        "não encontrado"."""
+
+    @abstractmethod
     async def get_by_driver_id_and_tenant(self, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> User | None:
         """D408 — login Mobile por CPF+Placa já resolveu explicitamente qual tenant antes de chegar
         aqui; usa o `tenant_id` recebido como parâmetro, nunca `get_current_tenant_id()` (ainda não

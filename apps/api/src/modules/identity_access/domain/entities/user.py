@@ -87,6 +87,16 @@ class User(BaseAggregateRoot[uuid.UUID]):
         self.role_ids = role_ids
         self.audit = self.audit.touched(by=updated_by, at=now)
 
+    def change_password_hash(self, *, senha_hash: str, updated_by: uuid.UUID | None, now: datetime) -> None:
+        """GAP IDENTITY (Gate 6) — usado pelo CLI operacional `reset_user_password.py`, nunca por
+        um endpoint HTTP (não existe fluxo de troca de senha pela própria API ainda). `senha_hash`
+        chega aqui já calculado pelo chamador (`core.security.password_hasher.BcryptPasswordHasher`
+        — igual a `CreateUserHandler`), o mesmo contrato de `User.create()`: este agregado nunca
+        importa `core` para hashear a própria senha (`DEPENDENCY_RULES.md`)."""
+
+        self.senha_hash = senha_hash
+        self.audit = self.audit.touched(by=updated_by, at=now)
+
     def deactivate(self, *, deactivated_by: uuid.UUID, now: datetime) -> None:
         if self.audit.is_deleted:
             raise ConflictError("IDENTITY_USER_ALREADY_INACTIVE", "Usuário já está desativado.")
