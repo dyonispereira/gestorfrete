@@ -6,9 +6,11 @@ bootstrap de primeiro admin de um tenant novo (GAP B, backlog separado) e delibe
 nenhum caminho HTTP paralelo de autenticação — isto só existe como comando executado por um
 operador com acesso direto ao ambiente da aplicação (mesmo `DATABASE_URL` que a API usa).
 
-Uso:
-    PYTHONPATH=src poetry run python scripts/reset_user_password.py \\
-        --tenant-id <uuid> --email <email>
+Uso (reset real):
+    poetry run python scripts/reset_user_password.py --tenant-id <uuid> --email <email>
+
+Uso (descoberta — só leitura, nunca muta nada, nunca pede senha):
+    poetry run python scripts/reset_user_password.py --discover-tenant --email <email>
 
 A nova senha é sempre pedida interativamente (nunca como argumento de linha de comando, para não
 ficar exposta em histórico de shell/`ps`).
@@ -21,6 +23,7 @@ import asyncio
 import getpass
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,6 +48,41 @@ from modules.tenancy.infrastructure.persistence.repositories.sqlalchemy_tenant_r
 MIN_PASSWORD_LENGTH = 8
 OPERATOR_LABEL = "CLI reset-user-password"
 _RESETTABLE_STATUSES = frozenset({UserStatus.ATIVO})
+
+
+@dataclass(frozen=True)
+class TenantCandidate:
+    """Um resultado de `--discover-tenant` — só o suficiente para o operador conferir visualmente
+    qual `--tenant-id` usar no reset real, nunca dado sensível (sem hash, sem e-mail duplicado
+    exposto além do que o operador já informou)."""
+
+    tenant_id: uuid.UUID
+    tenant_codigo: str
+    user_id: uuid.UUID
+    user_status: str
+
+
+async def discover_tenant_candidates(*, email: str) -> list[TenantCandidate]:
+    """Modo administrativo read-only — nunca muta nada, nunca pede senha, nunca escolhe um tenant
+    automaticamente para reset. Existe porque o mesmo e-mail pode existir em tenants diferentes
+    (`uq_usuarios_tenant_id_email` é só por tenant) e não há, hoje, nenhum outro caminho sem SQL
+    para um operador descobrir a qual tenant um e-mail pertence."""
+
+    async with SQLAlchemyUnitOfWork() as uow:
+        user_repo = SqlAlchemyUserRepository(uow.session)
+        tenant_repo = SqlAlchemyTenantRepository(uow.session)
+        matches = await user_repo.find_tenant_candidates_by_email(email)
+
+        candidates: list[TenantCandidate] = []
+        for user, tenant_id in matches:
+            tenant = await tenant_repo.get_by_id(tenant_id)
+            tenant_codigo = tenant.codigo if tenant is not None else "(tenant não encontrado)"
+            candidates.append(
+                TenantCandidate(
+                    tenant_id=tenant_id, tenant_codigo=tenant_codigo, user_id=user.id, user_status=user.status.value
+                )
+            )
+        return candidates
 
 
 async def reset_password(*, tenant_id: uuid.UUID, email: str, new_password: str) -> None:
@@ -109,9 +147,40 @@ async def reset_password(*, tenant_id: uuid.UUID, email: str, new_password: str)
 
 async def _main_async() -> int:
     parser = argparse.ArgumentParser(description="Reset operacional de senha de um usuário existente.")
-    parser.add_argument("--tenant-id", required=True, type=uuid.UUID)
+    parser.add_argument("--tenant-id", required=False, type=uuid.UUID, default=None)
     parser.add_argument("--email", required=True)
+    parser.add_argument(
+        "--discover-tenant",
+        action="store_true",
+        help="Modo read-only: lista os tenants onde este e-mail existe, sem alterar nada e sem pedir senha.",
+    )
     args = parser.parse_args()
+
+    if args.discover_tenant:
+        candidates = await discover_tenant_candidates(email=args.email)
+        if not candidates:
+            print(f"Nenhum tenant encontrado para {args.email}.")
+            return 0
+
+        print(f"{len(candidates)} tenant(s) encontrado(s) para {args.email}:")
+        for c in candidates:
+            print(f"  tenant_id={c.tenant_id}  tenant_codigo={c.tenant_codigo}  status={c.user_status}")
+
+        if len(candidates) > 1:
+            print(
+                "\nMais de um tenant com este e-mail — rode o reset novamente passando "
+                "explicitamente o --tenant-id correto (não há escolha automática)."
+            )
+        else:
+            print(
+                f"\nPara resetar, rode: --tenant-id {candidates[0].tenant_id} --email {args.email} "
+                "(sem --discover-tenant)."
+            )
+        return 0
+
+    if args.tenant_id is None:
+        print("--tenant-id é obrigatório fora do modo --discover-tenant.", file=sys.stderr)
+        return 1
 
     new_password = getpass.getpass("Nova senha: ")
     confirm_password = getpass.getpass("Confirme a nova senha: ")

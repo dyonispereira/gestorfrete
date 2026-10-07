@@ -98,6 +98,18 @@ class SqlAlchemyUserRepository(UserRepository):
             return None
         return _to_entity(model, await self._role_ids_for(model.id))
 
+    async def find_tenant_candidates_by_email(self, email: str) -> list[tuple[User, uuid.UUID]]:
+        # Igual a `get_by_email_in_tenant_for_update`: deliberadamente SEM `excluido_em.is_(None)`
+        # e SEM `get_current_tenant_id()` — consulta administrativa global, explícita no nome do
+        # método, nunca usada por autenticação.
+        stmt = select(UserModel).where(UserModel.email == email)
+        models = (await self._session.execute(stmt)).scalars().all()
+        results: list[tuple[User, uuid.UUID]] = []
+        for model in models:
+            user = _to_entity(model, await self._role_ids_for(model.id))
+            results.append((user, model.tenant_id))
+        return results
+
     async def get_by_driver_id_and_tenant(self, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> User | None:
         stmt = select(UserModel).where(
             UserModel.motorista_id == driver_id, UserModel.tenant_id == tenant_id, UserModel.excluido_em.is_(None)

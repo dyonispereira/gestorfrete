@@ -30,7 +30,11 @@ from modules.identity_access.infrastructure.persistence.repositories.sqlalchemy_
 from shared_kernel.domain.actor import AuthenticatedActor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.reset_user_password import MIN_PASSWORD_LENGTH, reset_password  # noqa: E402
+from scripts.reset_user_password import (  # noqa: E402
+    MIN_PASSWORD_LENGTH,
+    discover_tenant_candidates,
+    reset_password,
+)
 
 from tests.integration.test_fiscal_flow import (  # noqa: E402
     PASSWORD,
@@ -363,6 +367,77 @@ class TestResetUserPasswordConcurrency:
         assert await _session_statuses(user_id) == []
 
 
+class TestDiscoverTenantCandidates:
+    """GAP IDENTITY — modo `--discover-tenant`: só leitura, nunca muta nada. Criado porque não há
+    (e não vamos criar) nenhum caminho sem SQL para descobrir a qual tenant um e-mail pertence —
+    confirmado read-only em todas as asserções abaixo (hash/sessões/auditoria inalterados)."""
+
+    async def test_zero_resultados(self) -> None:
+        candidates = await discover_tenant_candidates(email="nao-existe-em-lugar-nenhum@teste.com")
+        assert candidates == []
+
+    async def test_exatamente_um_tenant(self, tenants: list[uuid.UUID]) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+        user_id, email = await _create_user(tenant_id, role_ids=frozenset())
+        hash_before = await _user_hash(user_id)
+
+        candidates = await discover_tenant_candidates(email=email)
+
+        assert len(candidates) == 1
+        assert candidates[0].tenant_id == tenant_id
+        assert candidates[0].user_id == user_id
+        assert candidates[0].user_status == "ATIVO"
+        assert await _user_hash(user_id) == hash_before
+        assert await _session_statuses(user_id) == []
+        assert await _reset_audit_count(tenant_id, user_id) == 0
+
+    async def test_mesmo_email_dois_tenants(self, tenants: list[uuid.UUID]) -> None:
+        tenant_a = await _create_tenant()
+        tenants.append(tenant_a)
+        tenant_b = await _create_tenant()
+        tenants.append(tenant_b)
+        shared_email = f"descoberta-{uuid.uuid4().hex[:8]}@teste.com"
+        user_a_id = await _create_user_with_email(tenant_a, shared_email)
+        user_b_id = await _create_user_with_email(tenant_b, shared_email)
+
+        candidates = await discover_tenant_candidates(email=shared_email)
+
+        assert len(candidates) == 2
+        found_tenant_ids = {c.tenant_id for c in candidates}
+        assert found_tenant_ids == {tenant_a, tenant_b}
+        found_user_ids = {c.user_id for c in candidates}
+        assert found_user_ids == {user_a_id, user_b_id}
+
+    async def test_inativo_e_bloqueado_aparecem_com_status_sem_mutacao(
+        self, tenants: list[uuid.UUID]
+    ) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+        inactive_id, inactive_email = await _create_user(tenant_id, role_ids=frozenset())
+        await _deactivate_user(tenant_id, inactive_id)
+        blocked_id, blocked_email = await _create_user(tenant_id, role_ids=frozenset())
+        await _set_user_status(blocked_id, "BLOQUEADO")
+
+        inactive_hash_before = await _user_hash(inactive_id)
+        blocked_hash_before = await _user_hash(blocked_id)
+
+        inactive_candidates = await discover_tenant_candidates(email=inactive_email)
+        blocked_candidates = await discover_tenant_candidates(email=blocked_email)
+
+        assert len(inactive_candidates) == 1
+        assert inactive_candidates[0].user_status == "INATIVO"
+        assert len(blocked_candidates) == 1
+        assert blocked_candidates[0].user_status == "BLOQUEADO"
+
+        assert await _user_hash(inactive_id) == inactive_hash_before
+        assert await _user_hash(blocked_id) == blocked_hash_before
+        assert await _session_statuses(inactive_id) == []
+        assert await _session_statuses(blocked_id) == []
+        assert await _reset_audit_count(tenant_id, inactive_id) == 0
+        assert await _reset_audit_count(tenant_id, blocked_id) == 0
+
+
 class TestResetUserPasswordCliEntrypoint:
     async def test_confirmacao_divergente_recusada_sem_mutacao(
         self, tenants: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -387,6 +462,49 @@ class TestResetUserPasswordCliEntrypoint:
         captured = capsys.readouterr()
         assert NEW_PASSWORD not in captured.out
         assert NEW_PASSWORD not in captured.err
+
+    async def test_discover_tenant_flag_nao_pede_senha_nem_muta(
+        self, tenants: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+        user_id, email = await _create_user(tenant_id, role_ids=frozenset())
+        hash_before = await _user_hash(user_id)
+
+        from scripts import reset_user_password as cli_module
+
+        def _getpass_should_not_be_called(*_a: object, **_k: object) -> str:
+            raise AssertionError("--discover-tenant nunca deve pedir senha")
+
+        monkeypatch.setattr(cli_module.getpass, "getpass", _getpass_should_not_be_called)
+        monkeypatch.setattr(
+            sys, "argv", ["reset_user_password.py", "--discover-tenant", "--email", email]
+        )
+
+        exit_code = await cli_module._main_async()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert str(tenant_id) in captured.out
+        assert "ATIVO" in captured.out
+        assert await _user_hash(user_id) == hash_before
+        assert await _session_statuses(user_id) == []
+        assert await _reset_audit_count(tenant_id, user_id) == 0
+
+    async def test_tenant_id_obrigatorio_fora_do_discover(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from scripts import reset_user_password as cli_module
+
+        monkeypatch.setattr(
+            sys, "argv", ["reset_user_password.py", "--email", "qualquer@teste.com"]
+        )
+
+        exit_code = await cli_module._main_async()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "--tenant-id" in captured.err
 
 
 async def _create_user_with_email(tenant_id: uuid.UUID, email: str) -> uuid.UUID:

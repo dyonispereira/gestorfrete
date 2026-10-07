@@ -33,6 +33,19 @@ class UserRepository(Repository[User, uuid.UUID]):
         "não encontrado"."""
 
     @abstractmethod
+    async def find_tenant_candidates_by_email(self, email: str) -> list[tuple[User, uuid.UUID]]:
+        """GAP IDENTITY (Gate 6) — descoberta administrativa, somente leitura, para o modo
+        `--discover-tenant` do CLI `reset_user_password.py`. Diferente de `get_by_email` (D208's
+        exceção, usada pelo login via `.scalar_one_or_none()` — que quebraria com
+        `MultipleResultsFound` se o mesmo e-mail existir em mais de um tenant, o bug latente já
+        registrado como GAP separado, não corrigido aqui), este método assume que múltiplos tenants
+        PODEM compartilhar o mesmo e-mail e retorna TODOS os `(User, tenant_id)` encontrados, para o
+        operador escolher explicitamente qual `--tenant-id` usar no reset real — nunca escolhido
+        automaticamente. Deliberadamente não filtra soft-deleted (mesmo motivo de
+        `get_by_email_in_tenant_for_update`: um usuário INATIVO precisa aparecer na descoberta, com
+        seu status real, não desaparecer). Nunca usado por nenhum fluxo de autenticação."""
+
+    @abstractmethod
     async def get_by_driver_id_and_tenant(self, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> User | None:
         """D408 — login Mobile por CPF+Placa já resolveu explicitamente qual tenant antes de chegar
         aqui; usa o `tenant_id` recebido como parâmetro, nunca `get_current_tenant_id()` (ainda não
