@@ -453,28 +453,45 @@ test.describe("Sprint 15 — Frontend, Lote Financeiro (Parte 2 e 2.1)", () => {
     // ao longo do fluxo — filtro estável pela linha mesmo depois do status/saldo mudarem.
     const rows = page.getByRole("row");
     const firstInstallmentRow = rows.filter({ hasText: "R$ 600,00" });
+    // Toast do Sonner (`data-sonner-toast`) com este texto exato — escopado só a esta notificação,
+    // nunca a outras (ex: "Fatura criada."). Causa raiz real investigada no código-fonte do Sonner
+    // (sonner@1.5.0): o CONTÊINER de toasts escuta `mouseenter`/`mouseleave` em si mesmo para
+    // pausar o timer de auto-dismiss de TODOS os toasts enquanto o cursor estiver sobre a região.
+    // O Playwright deixa o cursor sintético parado no último ponto clicado — como os cliques desta
+    // tela caem perto do canto inferior direito (mesma posição do toast, `position="bottom-right"`
+    // em `toaster.tsx`), o cursor fica "pairando" sobre o toast indefinidamente, nunca disparando
+    // `mouseleave`, e o timer nunca retoma. Não é flakiness de timing — é esse hover grudado.
+    // `page.mouse.move` para fora da região resolve na raiz, sem depender de quanto tempo o toast
+    // demora para sumir sozinho.
+    const confirmationToast = page.getByText("Recebimento confirmado.");
     await firstInstallmentRow.getByRole("button", { name: "Confirmar recebimento" }).click();
     const paymentDialog = page.getByRole("dialog");
     await paymentDialog.getByLabel("Valor recebido").fill("300");
     await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
-    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    await expect(confirmationToast.first()).toBeVisible({ timeout: 10_000 });
     await expect(firstInstallmentRow.getByText("Parcialmente recebida")).toBeVisible({ timeout: 10_000 });
     // "R$ 300,00" aparece nas colunas Recebido E Saldo dessa linha (300 de 600, metade) — `.first()`
     // só confirma presença, a igualdade recebido==saldo aqui já é a prova de que a baixa foi parcial.
     await expect(firstInstallmentRow.getByRole("cell", { name: "R$ 300,00" }).first()).toBeVisible();
+    // Tira o cursor sintético de cima do toast (canto superior esquerdo é sempre livre nesta tela)
+    // para destravar o timer de auto-dismiss do Sonner, depois espera deterministicamente sumir.
+    await page.mouse.move(0, 0);
+    await expect(confirmationToast).toHaveCount(0, { timeout: 10_000 });
 
     // Saldo remanescente → baixa final da MESMA parcela: os R$ 300 restantes, respeitando o
     // invariante `0 < valor <= saldo em aberto` (o input já vem pré-preenchido com o saldo).
     await firstInstallmentRow.getByRole("button", { name: "Confirmar recebimento" }).click();
     await expect(paymentDialog.getByLabel("Valor recebido")).toHaveValue("300.00");
     await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
-    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    await expect(confirmationToast.first()).toBeVisible({ timeout: 10_000 });
     await expect(firstInstallmentRow.getByText("Recebida", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await page.mouse.move(0, 0);
+    await expect(confirmationToast).toHaveCount(0, { timeout: 10_000 });
 
     // Segunda parcela: baixa total em uma única chamada — cobre o caminho "de sempre" ao lado do novo.
     await rows.filter({ hasText: "R$ 400,00" }).getByRole("button", { name: "Confirmar recebimento" }).click();
     await paymentDialog.getByRole("button", { name: "Confirmar recebimento" }).click();
-    await expect(page.getByText("Recebimento confirmado.").first()).toBeVisible({ timeout: 10_000 });
+    await expect(confirmationToast.first()).toBeVisible({ timeout: 10_000 });
     // "R$ 0,00" agora aparece no card de Saldo E na coluna Saldo de cada parcela — `.first()` só
     // confirma presença.
     await expect(page.getByText("R$ 0,00").first()).toBeVisible({ timeout: 10_000 });
