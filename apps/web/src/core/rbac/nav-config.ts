@@ -185,6 +185,21 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "comercial",
+    label: "Comercial",
+    items: [
+      {
+        id: "price-tables",
+        label: "Tabelas de Frete",
+        href: "/tabelas-frete",
+        icon: Tags,
+        requiredPermissions: ["pricing.price_table.view"],
+        description: "Tabelas de frete de venda e compra.",
+        implemented: true,
+      },
+    ],
+  },
+  {
     id: "maintenance",
     label: "Manutenção",
     items: [

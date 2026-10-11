@@ -23,6 +23,7 @@ const FIXTURE_FILES = [
   "financeiro-seed.sql",
   "resultado-gerencial-seed.sql",
   "dia-real-seed.sql",
+  "pricing-seed.sql",
 ];
 
 export default function globalSetup(): void {

@@ -9,6 +9,7 @@ import { useTripQuery } from "@/modules/freight/hooks/use-trips";
 import { AllocationPanel } from "@/modules/freight/components/allocation-panel";
 import { ChecklistPanel } from "@/modules/maintenance/components/checklist-panel";
 import { DeliveriesTab } from "@/modules/freight/components/deliveries-tab";
+import { TripCargoRouteCard } from "@/modules/freight/components/trip-cargo-route-card";
 import { OccurrencesTab } from "@/modules/freight/components/occurrences-tab";
 import { TripAttachmentsPanel } from "@/modules/freight/components/trip-attachments-panel";
 import { TripCommandsPanel } from "@/modules/freight/components/trip-commands-panel";
@@ -78,6 +79,7 @@ export default function TripDetailPage() {
               </CardHeader>
             </Card>
             <TripSnapshotsCard trip={trip} />
+            <TripCargoRouteCard trip={trip} canEdit={hasPermission("freight.trip.edit")} />
           </div>
         </TabsContent>
 
@@ -117,7 +119,7 @@ export default function TripDetailPage() {
         </TabsContent>
 
         <TabsContent value="financeiro">
-          <TripFinancialsCard tripId={tripId} />
+          <TripFinancialsCard trip={trip} canEdit={hasPermission("freight.trip.edit")} />
         </TabsContent>
 
         <TabsContent value="timeline">

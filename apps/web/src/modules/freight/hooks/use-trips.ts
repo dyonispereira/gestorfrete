@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import * as tripsService from "@/modules/freight/services/trips";
 import type {
+  ApplyPriceTableRequest,
   CancelarTripRequest,
   CloseAdministrativeTripRequest,
   CreateTripRequest,
@@ -113,4 +114,14 @@ export function useCloseAdministrativeTripMutation() {
   return useTripCommandMutation<CloseAdministrativeTripRequest>((tripId, body) =>
     tripsService.closeAdministrativeTrip(tripId, body)
   );
+}
+
+export function useApplyPriceTableMutation() {
+  return useTripCommandMutation<ApplyPriceTableRequest>((tripId, body) =>
+    tripsService.applyPriceTable(tripId, body)
+  );
+}
+
+export function useRemovePriceTableApplicationMutation() {
+  return useTripCommandMutation<void>((tripId) => tripsService.removePriceTableApplication(tripId));
 }

@@ -1,5 +1,6 @@
 import { apiFetch } from "@/shared/lib/api-client";
 import type {
+  ApplyPriceTableRequest,
   CancelarTripRequest,
   CloseAdministrativeTripRequest,
   CreateTripRequest,
@@ -86,4 +87,14 @@ export function cancelarTrip(id: string, body: CancelarTripRequest): Promise<Tri
 
 export function closeAdministrativeTrip(id: string, body: CloseAdministrativeTripRequest): Promise<Trip> {
   return apiFetch<Trip>(`/viagens/${id}/commands/close-administrative`, { method: "POST", body });
+}
+
+/* ── Tabela de Frete (Lote 2, GESTORFRETE — PROMPT MESTRE) ── */
+
+export function applyPriceTable(id: string, body: ApplyPriceTableRequest): Promise<Trip> {
+  return apiFetch<Trip>(`/viagens/${id}/commands/apply-price-table`, { method: "POST", body });
+}
+
+export function removePriceTableApplication(id: string): Promise<Trip> {
+  return apiFetch<Trip>(`/viagens/${id}/commands/apply-price-table`, { method: "DELETE" });
 }

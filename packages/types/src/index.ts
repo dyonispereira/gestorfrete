@@ -909,6 +909,7 @@ export interface TripSnapshots {
   client_snapshot?: Record<string, unknown>;
   predicted_revenue_snapshot?: string;
   applied_price_table_id?: UUID;
+  applied_price_table_application_id?: UUID;
 }
 
 export interface TripStatus {
@@ -927,6 +928,21 @@ export interface TripFinancials {
   financial_deviation?: string;
 }
 
+/** Lote 2 (`GESTORFRETE — PROMPT MESTRE`) — par PREVISTO de `itens_carga`/Romaneio (que só existe
+ * a partir da Coleta real); nunca um duplicado, é a estimativa informada na programação. */
+export interface TripCargoRoute {
+  origin_city?: string;
+  origin_state?: string;
+  destination_city?: string;
+  destination_state?: string;
+  predicted_distance_km?: string;
+  cargo_weight_kg?: string;
+  cargo_weight_tons?: string;
+  cargo_type?: string;
+  cargo_quantity?: number;
+  cargo_quantity_unit?: string;
+}
+
 export interface Trip {
   id: UUID;
   codigo: string;
@@ -936,6 +952,7 @@ export interface Trip {
   snapshots: TripSnapshots;
   status: TripStatus;
   financials: TripFinancials;
+  cargo_route: TripCargoRoute;
   distance_traveled_km?: string;
   audit: AuditMetadata;
 }
@@ -949,6 +966,20 @@ export interface CreateTripRequest {
 export interface UpdateTripRequest {
   data_programada?: string;
   janela_programada?: ISODateTime;
+  origem_cidade?: string;
+  origem_uf?: string;
+  destino_cidade?: string;
+  destino_uf?: string;
+  distancia_prevista_km?: string;
+  peso_carga_kg?: string;
+  tipo_carga?: string;
+  quantidade_carga?: number;
+  unidade_quantidade_carga?: string;
+}
+
+export interface ApplyPriceTableRequest {
+  price_table_item_id: UUID;
+  base_percentual_valor?: string;
 }
 
 export interface DispatchTripRequest {
@@ -1580,4 +1611,76 @@ export interface DriverResultDetail {
   result: DriverResult;
   trips: TripResult[];
   linked_costs: DriverLinkedCost[];
+}
+
+// --- Pricing (Lote 2, GESTORFRETE — PROMPT MESTRE) ---
+
+export type PriceTableDirection = "VENDA" | "COMPRA";
+export type PriceTableStatus = "RASCUNHO" | "VIGENTE" | "EXPIRADA";
+export type PriceTableUnit = "VIAGEM" | "KM" | "TONELADA" | "KG" | "FAIXA_DISTANCIA" | "PERCENTUAL";
+export type FaixaDistanciaMode = "TARIFA_POR_KM" | "VALOR_FIXO";
+
+export interface PriceTable {
+  id: UUID;
+  nome: string;
+  direcao: PriceTableDirection;
+  versao: number;
+  vigencia_inicio: string;
+  vigencia_fim?: string;
+  cliente_id?: UUID;
+  status: PriceTableStatus;
+  created_at: ISODateTime;
+  created_by?: UUID;
+  updated_at: ISODateTime;
+  updated_by?: UUID;
+}
+
+export interface PriceTableItem {
+  id: UUID;
+  tabela_preco_id: UUID;
+  unidade_calculo: PriceTableUnit;
+  categoria_veiculo_id?: UUID;
+  origem_uf?: string;
+  destino_uf?: string;
+  faixa_distancia_min_km?: string;
+  faixa_distancia_max_km?: string;
+  faixa_modo?: FaixaDistanciaMode;
+  valor: string;
+  valor_minimo?: string;
+  adicional_fixo?: string;
+  desconto_fixo?: string;
+  adicional_percentual?: string;
+  desconto_percentual?: string;
+  base_percentual_descricao?: string;
+  created_at: ISODateTime;
+}
+
+export interface CreatePriceTableRequest {
+  nome: string;
+  direcao: PriceTableDirection;
+  vigencia_inicio: string;
+  vigencia_fim?: string;
+  cliente_id?: UUID;
+}
+
+export interface UpdatePriceTableRequest {
+  nome?: string;
+  vigencia_fim?: string;
+}
+
+export interface CreatePriceTableItemRequest {
+  unidade_calculo: PriceTableUnit;
+  categoria_veiculo_id?: UUID;
+  origem_uf?: string;
+  destino_uf?: string;
+  faixa_distancia_min_km?: string;
+  faixa_distancia_max_km?: string;
+  faixa_modo?: FaixaDistanciaMode;
+  valor: string;
+  valor_minimo?: string;
+  adicional_fixo?: string;
+  desconto_fixo?: string;
+  adicional_percentual?: string;
+  desconto_percentual?: string;
+  base_percentual_descricao?: string;
 }
