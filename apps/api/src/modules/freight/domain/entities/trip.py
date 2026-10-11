@@ -70,6 +70,17 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         km_rodado: Decimal | None,
         encerrada: bool,
         margem_prevista: Decimal | None,
+        origem_cidade: str | None,
+        origem_uf: str | None,
+        destino_cidade: str | None,
+        destino_uf: str | None,
+        distancia_prevista_km: Decimal | None,
+        peso_carga_kg: Decimal | None,
+        toneladas_carga: Decimal | None,
+        tipo_carga: str | None,
+        quantidade_carga: int | None,
+        unidade_quantidade_carga: str | None,
+        aplicacao_tabela_preco_atual_id: uuid.UUID | None,
         audit: AuditMetadata,
     ) -> None:
         super().__init__(id)
@@ -95,6 +106,17 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         self.km_rodado = km_rodado
         self.encerrada = encerrada
         self.margem_prevista = margem_prevista
+        self.origem_cidade = origem_cidade
+        self.origem_uf = origem_uf
+        self.destino_cidade = destino_cidade
+        self.destino_uf = destino_uf
+        self.distancia_prevista_km = distancia_prevista_km
+        self.peso_carga_kg = peso_carga_kg
+        self.toneladas_carga = toneladas_carga
+        self.tipo_carga = tipo_carga
+        self.quantidade_carga = quantidade_carga
+        self.unidade_quantidade_carga = unidade_quantidade_carga
+        self.aplicacao_tabela_preco_atual_id = aplicacao_tabela_preco_atual_id
         self.audit = audit
 
     @classmethod
@@ -132,20 +154,79 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
             km_rodado=None,
             encerrada=False,
             margem_prevista=None,
+            origem_cidade=None,
+            origem_uf=None,
+            destino_cidade=None,
+            destino_uf=None,
+            distancia_prevista_km=None,
+            peso_carga_kg=None,
+            toneladas_carga=None,
+            tipo_carga=None,
+            quantidade_carga=None,
+            unidade_quantidade_carga=None,
+            aplicacao_tabela_preco_atual_id=None,
             audit=audit,
         )
 
     def update(
-        self, *, data_programada: date | None, janela_programada: datetime | None, updated_by: uuid.UUID, now: datetime
+        self,
+        *,
+        data_programada: date | None,
+        janela_programada: datetime | None,
+        origem_cidade: str | None,
+        origem_uf: str | None,
+        destino_cidade: str | None,
+        destino_uf: str | None,
+        distancia_prevista_km: Decimal | None,
+        peso_carga_kg: Decimal | None,
+        tipo_carga: str | None,
+        quantidade_carga: int | None,
+        unidade_quantidade_carga: str | None,
+        updated_by: uuid.UUID,
+        now: datetime,
     ) -> None:
+        """Dados de carga/percurso (`GESTORFRETE — PROMPT MESTRE`, Lote 2) são o par PREVISTO de
+        `itens_carga`/Romaneio (que só existe a partir da Coleta real, D005/D006) — nunca um
+        duplicado: aqui é estimativa informada na programação, lá é o registro real do que foi
+        efetivamente carregado. Editável pela mesma janela de `data_programada`/`janela_programada`
+        (qualquer estado não-terminal) — nenhuma restrição adicional nesta fase."""
+
         if self.status_operacional in _TERMINAL_STATUSES:
             raise DomainError(
                 "FREIGHT_TRIP_CANNOT_EDIT_TERMINAL", "Viagem em estado terminal não pode ser editada."
+            )
+        if distancia_prevista_km is not None and distancia_prevista_km <= 0:
+            raise DomainError(
+                "FREIGHT_TRIP_DISTANCIA_PREVISTA_INVALIDA", "distancia_prevista_km precisa ser maior que zero."
+            )
+        if peso_carga_kg is not None and peso_carga_kg <= 0:
+            raise DomainError("FREIGHT_TRIP_PESO_CARGA_INVALIDO", "peso_carga_kg precisa ser maior que zero.")
+        if quantidade_carga is not None and quantidade_carga <= 0:
+            raise DomainError(
+                "FREIGHT_TRIP_QUANTIDADE_CARGA_INVALIDA", "quantidade_carga precisa ser maior que zero."
             )
         if data_programada is not None:
             self.data_programada = data_programada
         if janela_programada is not None:
             self.janela_programada = janela_programada
+        if origem_cidade is not None:
+            self.origem_cidade = origem_cidade
+        if origem_uf is not None:
+            self.origem_uf = origem_uf
+        if destino_cidade is not None:
+            self.destino_cidade = destino_cidade
+        if destino_uf is not None:
+            self.destino_uf = destino_uf
+        if distancia_prevista_km is not None:
+            self.distancia_prevista_km = distancia_prevista_km
+        if peso_carga_kg is not None:
+            self.peso_carga_kg = peso_carga_kg
+        if tipo_carga is not None:
+            self.tipo_carga = tipo_carga
+        if quantidade_carga is not None:
+            self.quantidade_carga = quantidade_carga
+        if unidade_quantidade_carga is not None:
+            self.unidade_quantidade_carga = unidade_quantidade_carga
         self.audit = self.audit.touched(by=updated_by, at=now)
 
     def delete(self, *, deleted_by: uuid.UUID, now: datetime) -> None:
@@ -306,6 +387,39 @@ class Trip(BaseAggregateRoot[uuid.UUID]):
         estimado (histórico bruto continua só em `leituras_hodometro`, D034)."""
 
         self.km_rodado = value
+
+    def apply_price_table(
+        self, *, tabela_preco_id: uuid.UUID, aplicacao_id: uuid.UUID, receita_prevista_snapshot: Decimal
+    ) -> None:
+        """Lote 2 — imutável assim que aplicada: uma segunda aplicação sem remover a anterior
+        primeiro é rejeitada (`FREIGHT_TRIP_PRICE_ALREADY_APPLIED`), nunca sobrescreve
+        silenciosamente (D038, mesmo princípio dos outros snapshots de Viagem)."""
+
+        if self.aplicacao_tabela_preco_atual_id is not None:
+            raise ConflictError(
+                "FREIGHT_TRIP_PRICE_ALREADY_APPLIED",
+                "Já existe uma Tabela de Frete aplicada nesta Viagem — remova antes de aplicar outra.",
+            )
+        self.tabela_preco_aplicada_snapshot_id = tabela_preco_id
+        self.aplicacao_tabela_preco_atual_id = aplicacao_id
+        self.receita_prevista_snapshot = receita_prevista_snapshot
+
+    def remove_price_table_application(self) -> None:
+        """Pré-condição "esta Viagem não pode ter nenhum CT-e emitido" é verificada pelo Handler
+        ANTES de chamar este método (mesmo padrão de `finish()`/D235) — nunca aqui: checar
+        existência de CT-e exigiria `freight.domain` importar `documents`, violando D033/D034
+        (achado real: `status_fiscal` não serve para isso, porque o fluxo real de dispatch nunca
+        o transiciona para fora de `PENDENTE` — `record_fiscal_transition()` é só simulação,
+        D375 — então a checagem real é feita contra `documents.CteRepository.list_page` no Handler,
+        não contra esse campo)."""
+
+        if self.aplicacao_tabela_preco_atual_id is None:
+            raise ConflictError(
+                "FREIGHT_TRIP_NO_PRICE_APPLIED", "Esta Viagem não tem nenhuma Tabela de Frete aplicada."
+            )
+        self.tabela_preco_aplicada_snapshot_id = None
+        self.aplicacao_tabela_preco_atual_id = None
+        self.receita_prevista_snapshot = None
 
     def _recompute_realized_margin(self) -> None:
         """D392 — `margem_realizada`/`desvio_financeiro` recalculados pela Application a cada

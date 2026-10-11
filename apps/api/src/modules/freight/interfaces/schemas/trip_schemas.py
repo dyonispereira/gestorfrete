@@ -23,6 +23,20 @@ class TripSnapshotsResponse(BaseModel):
     client_snapshot: dict[str, Any] | None
     predicted_revenue_snapshot: Decimal | None
     applied_price_table_id: uuid.UUID | None
+    applied_price_table_application_id: uuid.UUID | None
+
+
+class TripCargoRouteResponse(BaseModel):
+    origin_city: str | None
+    origin_state: str | None
+    destination_city: str | None
+    destination_state: str | None
+    predicted_distance_km: Decimal | None
+    cargo_weight_kg: Decimal | None
+    cargo_weight_tons: Decimal | None
+    cargo_type: str | None
+    cargo_quantity: int | None
+    cargo_quantity_unit: str | None
 
 
 class TripStatusResponse(BaseModel):
@@ -50,6 +64,7 @@ class TripResponse(BaseModel):
     snapshots: TripSnapshotsResponse
     status: TripStatusResponse
     financials: TripFinancialsResponse
+    cargo_route: TripCargoRouteResponse
     distance_traveled_km: Decimal | None
     audit: AuditMetadataResponse
 
@@ -69,6 +84,7 @@ class TripResponse(BaseModel):
                 client_snapshot=dto.cliente_snapshot,
                 predicted_revenue_snapshot=dto.receita_prevista_snapshot,
                 applied_price_table_id=dto.tabela_preco_aplicada_snapshot_id,
+                applied_price_table_application_id=dto.aplicacao_tabela_preco_atual_id,
             ),
             status=TripStatusResponse(
                 operational=dto.status_operacional, fiscal=dto.status_fiscal, financial=dto.status_financeiro,
@@ -81,6 +97,13 @@ class TripResponse(BaseModel):
                 predicted_margin=dto.margem_prevista,
                 actual_margin=dto.margem_realizada,
                 financial_deviation=dto.desvio_financeiro,
+            ),
+            cargo_route=TripCargoRouteResponse(
+                origin_city=dto.origem_cidade, origin_state=dto.origem_uf, destination_city=dto.destino_cidade,
+                destination_state=dto.destino_uf, predicted_distance_km=dto.distancia_prevista_km,
+                cargo_weight_kg=dto.peso_carga_kg, cargo_weight_tons=dto.toneladas_carga,
+                cargo_type=dto.tipo_carga, cargo_quantity=dto.quantidade_carga,
+                cargo_quantity_unit=dto.unidade_quantidade_carga,
             ),
             distance_traveled_km=dto.km_rodado,
             audit=AuditMetadataResponse(
@@ -102,6 +125,22 @@ class UpdateTripRequest(BaseModel):
 
     data_programada: date | None = None
     janela_programada: datetime | None = None
+    origem_cidade: str | None = None
+    origem_uf: str | None = None
+    destino_cidade: str | None = None
+    destino_uf: str | None = None
+    distancia_prevista_km: Decimal | None = None
+    peso_carga_kg: Decimal | None = None
+    tipo_carga: str | None = None
+    quantidade_carga: int | None = None
+    unidade_quantidade_carga: str | None = None
+
+
+class ApplyPriceTableRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    price_table_item_id: uuid.UUID
+    base_percentual_valor: Decimal | None = None
 
 
 class DispatchTripRequest(BaseModel):

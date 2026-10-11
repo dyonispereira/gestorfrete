@@ -44,6 +44,17 @@ def _to_entity(model: TripModel) -> Trip:
         km_rodado=model.km_rodado,
         encerrada=model.encerrada,
         margem_prevista=model.margem_prevista,
+        origem_cidade=model.origem_cidade,
+        origem_uf=model.origem_uf,
+        destino_cidade=model.destino_cidade,
+        destino_uf=model.destino_uf,
+        distancia_prevista_km=model.distancia_prevista_km,
+        peso_carga_kg=model.peso_carga_kg,
+        toneladas_carga=model.toneladas_carga,
+        tipo_carga=model.tipo_carga,
+        quantidade_carga=model.quantidade_carga,
+        unidade_quantidade_carga=model.unidade_quantidade_carga,
+        aplicacao_tabela_preco_atual_id=model.aplicacao_tabela_preco_atual_id,
         audit=AuditMetadata(
             created_at=model.criado_em,
             created_by=model.criado_por,
@@ -163,18 +174,30 @@ class SqlAlchemyTripRepository(TripRepository):
         model.margem_realizada = aggregate.margem_realizada
         model.desvio_financeiro = aggregate.desvio_financeiro
         model.km_rodado = aggregate.km_rodado
+        model.origem_cidade = aggregate.origem_cidade
+        model.origem_uf = aggregate.origem_uf
+        model.destino_cidade = aggregate.destino_cidade
+        model.destino_uf = aggregate.destino_uf
+        model.distancia_prevista_km = aggregate.distancia_prevista_km
+        model.peso_carga_kg = aggregate.peso_carga_kg
+        model.tipo_carga = aggregate.tipo_carga
+        model.quantidade_carga = aggregate.quantidade_carga
+        model.unidade_quantidade_carga = aggregate.unidade_quantidade_carga
+        model.aplicacao_tabela_preco_atual_id = aggregate.aplicacao_tabela_preco_atual_id
         model.criado_em = aggregate.audit.created_at
         model.criado_por = aggregate.audit.created_by
         model.atualizado_em = aggregate.audit.updated_at
         model.atualizado_por = aggregate.audit.updated_by
         model.excluido_em = aggregate.audit.deleted_at
         model.excluido_por = aggregate.audit.deleted_by
-        # `encerrada`/`margem_prevista` nunca atribuídas ao model (GENERATED, D019/D185) — recarregadas
-        # do banco após o flush para a entidade em memória nunca ficar obsoleta (D238).
+        # `encerrada`/`margem_prevista`/`toneladas_carga` nunca atribuídas ao model (GENERATED,
+        # D019/D185) — recarregadas do banco após o flush para a entidade em memória nunca ficar
+        # obsoleta (D238).
         await self._session.flush()
         await self._session.refresh(model)
         aggregate.encerrada = model.encerrada
         aggregate.margem_prevista = model.margem_prevista
+        aggregate.toneladas_carga = model.toneladas_carga
 
     async def find(self, specification: Specification[Trip]) -> list[Trip]:
         raise NotImplementedError("Use list_page — filtros de Trip são resolvidos via SQL")

@@ -34,6 +34,17 @@ class TripDTO:
     margem_realizada: Decimal | None
     desvio_financeiro: Decimal | None
     km_rodado: Decimal | None
+    origem_cidade: str | None
+    origem_uf: str | None
+    destino_cidade: str | None
+    destino_uf: str | None
+    distancia_prevista_km: Decimal | None
+    peso_carga_kg: Decimal | None
+    toneladas_carga: Decimal | None
+    tipo_carga: str | None
+    quantidade_carga: int | None
+    unidade_quantidade_carga: str | None
+    aplicacao_tabela_preco_atual_id: uuid.UUID | None
     created_at: datetime
     created_by: uuid.UUID | None
     updated_at: datetime
@@ -65,6 +76,17 @@ class TripDTO:
             margem_realizada=trip.margem_realizada,
             desvio_financeiro=trip.desvio_financeiro,
             km_rodado=trip.km_rodado,
+            origem_cidade=trip.origem_cidade,
+            origem_uf=trip.origem_uf,
+            destino_cidade=trip.destino_cidade,
+            destino_uf=trip.destino_uf,
+            distancia_prevista_km=trip.distancia_prevista_km,
+            peso_carga_kg=trip.peso_carga_kg,
+            toneladas_carga=trip.toneladas_carga,
+            tipo_carga=trip.tipo_carga,
+            quantidade_carga=trip.quantidade_carga,
+            unidade_quantidade_carga=trip.unidade_quantidade_carga,
+            aplicacao_tabela_preco_atual_id=trip.aplicacao_tabela_preco_atual_id,
             created_at=trip.audit.created_at,
             created_by=trip.audit.created_by,
             updated_at=trip.audit.updated_at,

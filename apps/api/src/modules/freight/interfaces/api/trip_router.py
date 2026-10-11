@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 from core.database.session import get_session_factory
 from core.idempotency.guard import with_idempotency
 from modules.freight.application.commands.accept_trip import AcceptTripCommand, AcceptTripHandler
+from modules.freight.application.commands.apply_price_table import ApplyPriceTableCommand, ApplyPriceTableHandler
 from modules.freight.application.commands.cancelar_trip import CancelarTripCommand, CancelarTripHandler
 from modules.freight.application.commands.close_administrative_trip import (
     CloseAdministrativeTripCommand,
@@ -27,6 +28,10 @@ from modules.freight.application.commands.reallocate_trip_resources import (
     ReallocateTripResourcesCommand,
     ReallocateTripResourcesHandler,
 )
+from modules.freight.application.commands.remove_price_table_application import (
+    RemovePriceTableApplicationCommand,
+    RemovePriceTableApplicationHandler,
+)
 from modules.freight.application.commands.retomar_trip import RetomarTripCommand, RetomarTripHandler
 from modules.freight.application.commands.update_trip import UpdateTripCommand, UpdateTripHandler
 from modules.freight.application.queries.get_trip import GetTripHandler, GetTripQuery
@@ -41,6 +46,7 @@ from modules.freight.interfaces.schemas.trip_allocation_schemas import (
     TripAllocationResponse,
 )
 from modules.freight.interfaces.schemas.trip_schemas import (
+    ApplyPriceTableRequest,
     CancelarTripRequest,
     CloseAdministrativeTripRequest,
     CreateTripRequest,
@@ -128,7 +134,12 @@ async def update_trip(
     handler = UpdateTripHandler()
     dto = await handler.handle(
         UpdateTripCommand(
-            actor=actor, trip_id=trip_id, data_programada=body.data_programada, janela_programada=body.janela_programada
+            actor=actor, trip_id=trip_id, data_programada=body.data_programada,
+            janela_programada=body.janela_programada, origem_cidade=body.origem_cidade,
+            origem_uf=body.origem_uf, destino_cidade=body.destino_cidade, destino_uf=body.destino_uf,
+            distancia_prevista_km=body.distancia_prevista_km, peso_carga_kg=body.peso_carga_kg,
+            tipo_carga=body.tipo_carga, quantidade_carga=body.quantidade_carga,
+            unidade_quantidade_carga=body.unidade_quantidade_carga,
         )
     )
     return TripResponse.from_dto(dto)
@@ -140,6 +151,53 @@ async def delete_trip(
 ) -> None:
     handler = DeleteTripHandler()
     await handler.handle(DeleteTripCommand(actor=actor, trip_id=trip_id))
+
+
+# --- Tabela de Frete (Lote 2, `GESTORFRETE — PROMPT MESTRE`) ---
+
+
+@router.post("/{trip_id}/commands/apply-price-table")
+async def apply_price_table(
+    trip_id: uuid.UUID, body: ApplyPriceTableRequest, response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.edit")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    async def _run() -> TripResponse:
+        handler = ApplyPriceTableHandler()
+        dto = await handler.handle(
+            ApplyPriceTableCommand(
+                actor=actor, trip_id=trip_id, price_table_item_id=body.price_table_item_id,
+                base_percentual_valor=body.base_percentual_valor,
+            )
+        )
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="POST",
+        path=f"/viagens/{trip_id}/commands/apply-price-table", payload=body.model_dump(mode="json"),
+        status_code=200, run=_run,
+    )
+    response.status_code = status_code
+    return response_body
+
+
+@router.delete("/{trip_id}/commands/apply-price-table")
+async def remove_price_table_application(
+    trip_id: uuid.UUID, response: Response,
+    actor: AuthenticatedActor = Depends(require_permission("freight.trip.edit")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    async def _run() -> TripResponse:
+        handler = RemovePriceTableApplicationHandler()
+        dto = await handler.handle(RemovePriceTableApplicationCommand(actor=actor, trip_id=trip_id))
+        return TripResponse.from_dto(dto)
+
+    status_code, response_body = await with_idempotency(
+        tenant_id=actor.tenant_id, idempotency_key=idempotency_key, method="DELETE",
+        path=f"/viagens/{trip_id}/commands/apply-price-table", payload={}, status_code=200, run=_run,
+    )
+    response.status_code = status_code
+    return response_body
 
 
 # --- Alocação de Recursos (D188) ---

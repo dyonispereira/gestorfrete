@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from core.database.unit_of_work import SQLAlchemyUnitOfWork
 from core.exceptions.base import NotFoundError
@@ -20,11 +21,21 @@ class UpdateTripCommand(Command):
     trip_id: uuid.UUID
     data_programada: date | None
     janela_programada: datetime | None
+    origem_cidade: str | None = None
+    origem_uf: str | None = None
+    destino_cidade: str | None = None
+    destino_uf: str | None = None
+    distancia_prevista_km: Decimal | None = None
+    peso_carga_kg: Decimal | None = None
+    tipo_carga: str | None = None
+    quantidade_carga: int | None = None
+    unidade_quantidade_carga: str | None = None
 
 
 class UpdateTripHandler(CommandHandler[UpdateTripCommand, TripDTO]):
-    """D233/D237 — só `data_programada`/`janela_programada`. `status`/`references`/`snapshots`/
-    `financials` nunca aceitos aqui (`014-trips.md`)."""
+    """D233/D237 — `data_programada`/`janela_programada` + dados de carga/percurso (Lote 2,
+    `GESTORFRETE — PROMPT MESTRE`). `status`/`references`/`snapshots`/`financials` nunca aceitos
+    aqui (`014-trips.md`)."""
 
     async def handle(self, command: UpdateTripCommand) -> TripDTO:
         async with SQLAlchemyUnitOfWork() as uow:
@@ -36,6 +47,15 @@ class UpdateTripHandler(CommandHandler[UpdateTripCommand, TripDTO]):
             trip.update(
                 data_programada=command.data_programada,
                 janela_programada=command.janela_programada,
+                origem_cidade=command.origem_cidade,
+                origem_uf=command.origem_uf,
+                destino_cidade=command.destino_cidade,
+                destino_uf=command.destino_uf,
+                distancia_prevista_km=command.distancia_prevista_km,
+                peso_carga_kg=command.peso_carga_kg,
+                tipo_carga=command.tipo_carga,
+                quantidade_carga=command.quantidade_carga,
+                unidade_quantidade_carga=command.unidade_quantidade_carga,
                 updated_by=command.actor.user_id,
                 now=datetime.now(timezone.utc),
             )

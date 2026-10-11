@@ -63,6 +63,7 @@ from modules.mobile.interfaces.api.driver_signature_router import router as driv
 from modules.mobile.interfaces.api.driver_sync_router import router as driver_sync_router
 from modules.mobile.interfaces.api.driver_trip_router import router as driver_trip_router
 from modules.notification_center.interfaces.api.notification_router import router as notification_router
+from modules.pricing.interfaces.api.price_table_router import router as price_table_router
 from modules.reporting.interfaces.api.dashboard_router import router as dashboard_router
 from modules.reporting.interfaces.api.export_router import router as export_router
 from modules.reporting.interfaces.api.saved_filter_router import router as saved_filter_router
@@ -192,6 +193,7 @@ api_router_v1.include_router(notification_router)
 api_router_v1.include_router(webhook_router)
 api_router_v1.include_router(job_router)
 api_router_v1.include_router(integration_config_router)
+api_router_v1.include_router(price_table_router)
 
 # Sprint 11, Lote 11 — BI (D418-D422). `analytics` lê os módulos operacionais (D090/D149); nenhum
 # módulo operacional importa `analytics`/`reporting` (D421, novo contrato do import-linter).

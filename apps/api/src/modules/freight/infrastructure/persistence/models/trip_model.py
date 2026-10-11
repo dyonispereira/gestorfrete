@@ -14,8 +14,9 @@ from core.database.orm_base import Base
 
 class TripModel(Base):
     """Mapeamento de `viagens` (`relational/003-operacao.md`) — o agregado mais rico do sistema.
-    `encerrada`/`margem_prevista` são colunas `GENERATED ALWAYS AS (...) STORED` no Postgres
-    (D019/D185), já criadas via SQL bruto na migration — mapeadas aqui com `Computed(...)` só para
+    `encerrada`/`margem_prevista`/`toneladas_carga` são colunas `GENERATED ALWAYS AS (...) STORED`
+    no Postgres (D019/D185), já criadas via SQL bruto na migration — mapeadas aqui com
+    `Computed(...)` só para
     o ORM saber que nunca deve incluí-las em `INSERT`/`UPDATE` (sem isso, SQLAlchemy tenta gravar
     o valor Python-side em toda escrita e o Postgres rejeita com `GeneratedAlwaysError`, achado
     rodando a suíte de integração pela primeira vez). `tabela_preco_aplicada_snapshot_id` sem FK
@@ -75,6 +76,18 @@ class TripModel(Base):
     desvio_financeiro: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     km_rodado: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+
+    origem_cidade: Mapped[str | None] = mapped_column(String)
+    origem_uf: Mapped[str | None] = mapped_column(String(2))
+    destino_cidade: Mapped[str | None] = mapped_column(String)
+    destino_uf: Mapped[str | None] = mapped_column(String(2))
+    distancia_prevista_km: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    peso_carga_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    toneladas_carga: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), Computed("peso_carga_kg / 1000"))
+    tipo_carga: Mapped[str | None] = mapped_column(String)
+    quantidade_carga: Mapped[int | None] = mapped_column(Integer)
+    unidade_quantidade_carga: Mapped[str | None] = mapped_column(String)
+    aplicacao_tabela_preco_atual_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     criado_por: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
