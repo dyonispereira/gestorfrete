@@ -432,41 +432,148 @@ CREATE TABLE solicitacoes_frete (
 
 ## `tabelas_preco` e `itens_tabela_preco`
 
-Trazidas de `001-cadastros.md` por dependência direta (ver Reconciliações, acima).
+Implementadas no Lote 2 (`GESTORFRETE — PROMPT MESTRE`,
+`alembic/versions/d10bc3b53be7_pricing_tabelas_preco.py`). O desenho abaixo substitui a versão
+anterior deste documento (que usava `condicao TEXT` livre): o cálculo determinístico exigido pelo
+Lote 2 precisava de critérios estruturados, não texto livre interpretado por humano. `direcao`
+(VENDA/COMPRA) também é novo — o desenho original não previa frete de compra (pago a
+transportador), que só passou a fazer sentido com o Acerto de Transportadores (backlog).
 
 ```sql
+CREATE TYPE tabelas_preco_direcao_enum AS ENUM ('VENDA', 'COMPRA');
 CREATE TYPE tabelas_preco_status_enum AS ENUM ('RASCUNHO', 'VIGENTE', 'EXPIRADA');
+CREATE TYPE itens_tabela_preco_unidade_enum AS ENUM
+    ('VIAGEM', 'KM', 'TONELADA', 'KG', 'FAIXA_DISTANCIA', 'PERCENTUAL');
 
 CREATE TABLE tabelas_preco (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id           UUID NOT NULL REFERENCES tenants(id),
     nome                TEXT NOT NULL,
+    direcao             tabelas_preco_direcao_enum NOT NULL,
+    versao              INTEGER NOT NULL DEFAULT 1,   -- incrementa a cada mutação pós-criação
     vigencia_inicio     DATE NOT NULL,
     vigencia_fim        DATE,
-    cliente_id          UUID REFERENCES clientes(id),   -- opcional — ausente = tabela geral
+    cliente_id          UUID REFERENCES clientes(id),   -- opcional, só VENDA — ausente = tabela geral
     status              tabelas_preco_status_enum NOT NULL DEFAULT 'RASCUNHO',
     criado_em           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    criado_por          UUID REFERENCES usuarios(id),
     atualizado_em       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    atualizado_por      UUID REFERENCES usuarios(id),
 
     CONSTRAINT ck_tabelas_preco_vigencia
-        CHECK (vigencia_fim IS NULL OR vigencia_fim > vigencia_inicio)   -- D199
+        CHECK (vigencia_fim IS NULL OR vigencia_fim > vigencia_inicio),   -- D199
+    CONSTRAINT ck_tabelas_preco_cliente_so_venda
+        CHECK (direcao = 'VENDA' OR cliente_id IS NULL)
 );
+CREATE INDEX idx_tabelas_preco_tenant_id ON tabelas_preco (tenant_id);
+CREATE INDEX idx_tabelas_preco_tenant_id_direcao_status ON tabelas_preco (tenant_id, direcao, status);
 
 CREATE TABLE itens_tabela_preco (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id           UUID NOT NULL REFERENCES tenants(id),   -- D174/D193
-    tabela_preco_id     UUID NOT NULL REFERENCES tabelas_preco(id),
-    condicao            TEXT NOT NULL,   -- rota/tipo de carga/faixa de peso
-    valor                NUMERIC(14,2) NOT NULL CHECK (valor > 0)
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id               UUID NOT NULL REFERENCES tenants(id),   -- D174/D193
+    tabela_preco_id         UUID NOT NULL REFERENCES tabelas_preco(id),
+    unidade_calculo         itens_tabela_preco_unidade_enum NOT NULL,
+    categoria_veiculo_id    UUID REFERENCES categorias_veiculo(id),   -- opcional — vazio = qualquer categoria
+    origem_uf               CHAR(2),
+    destino_uf              CHAR(2),
+    faixa_distancia_min_km  NUMERIC(10,2),
+    faixa_distancia_max_km  NUMERIC(10,2),
+    faixa_modo              TEXT,   -- 'TARIFA_POR_KM' | 'VALOR_FIXO', obrigatório só p/ FAIXA_DISTANCIA
+    valor                   NUMERIC(14,2) NOT NULL CHECK (valor > 0),
+    valor_minimo            NUMERIC(14,2) CHECK (valor_minimo IS NULL OR valor_minimo > 0),
+    adicional_fixo          NUMERIC(14,2),
+    desconto_fixo           NUMERIC(14,2),
+    adicional_percentual    NUMERIC(5,2),
+    desconto_percentual     NUMERIC(5,2),
+    base_percentual_descricao TEXT,   -- obrigatório quando unidade_calculo = 'PERCENTUAL'
+    criado_em               TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT ck_itens_tabela_preco_faixa_distancia_completa CHECK (
+        unidade_calculo != 'FAIXA_DISTANCIA'
+        OR (faixa_distancia_min_km IS NOT NULL AND faixa_distancia_max_km IS NOT NULL
+            AND faixa_distancia_max_km > faixa_distancia_min_km
+            AND faixa_modo IN ('TARIFA_POR_KM', 'VALOR_FIXO'))
+    ),
+    CONSTRAINT ck_itens_tabela_preco_percentual_exige_base
+        CHECK (unidade_calculo != 'PERCENTUAL' OR base_percentual_descricao IS NOT NULL)
 );
 
 CREATE INDEX idx_itens_tabela_preco_tenant_id ON itens_tabela_preco (tenant_id);
 CREATE INDEX idx_itens_tabela_preco_tabela_preco_id ON itens_tabela_preco (tabela_preco_id);
 ```
 
-`viagens.tabela_preco_aplicada_snapshot_id` (acima) referencia `tabelas_preco(id)` **sem** FK
-`ON UPDATE`/reatualização — é um snapshot (D073), congelado no momento da aprovação da Cotação; a
-tabela real pode ser revisada depois sem afetar viagens já criadas.
+Cálculo (`modules/pricing/application/price_calculation_service.py`), ordem fixa, `Decimal`,
+arredondamento só no passo final: valor base (conforme `unidade_calculo`) → `+ adicional_fixo` →
+`- desconto_fixo` → `× (1 + adicional_percentual/100)` → `× (1 - desconto_percentual/100)` →
+`max(resultado, valor_minimo)`.
+
+`PERCENTUAL` nunca infere a base sozinho (nem do frete de venda, nem de nenhum outro campo) — o
+item só guarda `base_percentual_descricao` (texto explicativo); o valor numérico da base é sempre
+informado explicitamente pelo operador no momento da aplicação na Viagem.
+
+Campos de rota (`origem_uf`/`destino_uf`) e faixa de distância existem no schema mas **a aplicação
+automática por rota geográfica ainda não é possível** — depende de `modules/routing` (ainda vazio).
+Nesta fase o operador escolhe manualmente o item compatível.
+
+### `aplicacoes_tabela_preco_viagem`
+
+Snapshot completo e append-only (nunca `UPDATE`/`DELETE` físico, D109-consistent) de cada aplicação
+de Tabela de Frete numa Viagem — `alembic/versions/18bc06f9bb5a_freight_carga_rota_aplicacao_preco.py`.
+
+```sql
+CREATE TABLE aplicacoes_tabela_preco_viagem (
+    id                              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id                       UUID NOT NULL REFERENCES tenants(id),
+    viagem_id                       UUID NOT NULL REFERENCES viagens(id),
+    tabela_preco_id                 UUID NOT NULL REFERENCES tabelas_preco(id),
+    item_tabela_preco_id            UUID NOT NULL REFERENCES itens_tabela_preco(id),
+    tabela_preco_versao             INTEGER NOT NULL,
+    direcao                         TEXT NOT NULL,
+    unidade_calculo                 TEXT NOT NULL,
+    quantidade_utilizada            NUMERIC(14,3),
+    base_percentual_valor           NUMERIC(14,2),
+    tarifa_aplicada                 NUMERIC(14,2) NOT NULL,
+    valor_minimo_aplicado           NUMERIC(14,2),
+    adicional_fixo_aplicado         NUMERIC(14,2),
+    desconto_fixo_aplicado          NUMERIC(14,2),
+    adicional_percentual_aplicado   NUMERIC(5,2),
+    desconto_percentual_aplicado    NUMERIC(5,2),
+    valor_calculado_bruto           NUMERIC(14,2) NOT NULL,
+    valor_final                     NUMERIC(14,2) NOT NULL CHECK (valor_final >= 0),
+    aplicado_em                     TIMESTAMPTZ NOT NULL,
+    aplicado_por                    UUID NOT NULL REFERENCES usuarios(id),
+    removido_em                     TIMESTAMPTZ,   -- "desfazer" marca, nunca apaga
+    removido_por                    UUID REFERENCES usuarios(id)
+);
+CREATE INDEX idx_aplicacoes_tabela_preco_viagem_viagem_id ON aplicacoes_tabela_preco_viagem (viagem_id);
+CREATE INDEX idx_aplicacoes_tabela_preco_viagem_tenant_id ON aplicacoes_tabela_preco_viagem (tenant_id);
+```
+
+`viagens.tabela_preco_aplicada_snapshot_id` (acima) continua apontando direto para
+`tabelas_preco(id)` **sem** FK `ON UPDATE`/reatualização — snapshot (D073), inalterado por este
+lote. `viagens.aplicacao_tabela_preco_atual_id` é novo: aponta para a linha ativa (não-removida)
+em `aplicacoes_tabela_preco_viagem`, ou `NULL` se nenhuma aplicação está ativa.
+
+### Dados de carga/percurso em `viagens` (par PREVISTO de `itens_carga`)
+
+Também do Lote 2 — `itens_carga`/Romaneio (acima) só existem a partir da Coleta real (D005/D006),
+tarde demais para o cálculo de frete PREVISTO na programação. Estes campos são a estimativa
+informada na programação, nunca um duplicado do dado real de carga:
+
+```sql
+ALTER TABLE viagens ADD COLUMN origem_cidade TEXT;
+ALTER TABLE viagens ADD COLUMN origem_uf CHAR(2);
+ALTER TABLE viagens ADD COLUMN destino_cidade TEXT;
+ALTER TABLE viagens ADD COLUMN destino_uf CHAR(2);
+ALTER TABLE viagens ADD COLUMN distancia_prevista_km NUMERIC(10,2) CHECK (distancia_prevista_km IS NULL OR distancia_prevista_km > 0);
+ALTER TABLE viagens ADD COLUMN peso_carga_kg NUMERIC(12,2) CHECK (peso_carga_kg IS NULL OR peso_carga_kg > 0);
+ALTER TABLE viagens ADD COLUMN toneladas_carga NUMERIC(12,3)
+    GENERATED ALWAYS AS (peso_carga_kg / 1000) STORED;   -- mesmo padrão de margem_prevista/encerrada
+ALTER TABLE viagens ADD COLUMN tipo_carga TEXT;
+ALTER TABLE viagens ADD COLUMN quantidade_carga INTEGER CHECK (quantidade_carga IS NULL OR quantidade_carga > 0);
+ALTER TABLE viagens ADD COLUMN unidade_quantidade_carga TEXT;
+ALTER TABLE viagens ADD COLUMN aplicacao_tabela_preco_atual_id UUID;
+```
 
 ---
 
