@@ -89,11 +89,18 @@ export interface MeResponse {
   tenant: TenantContext;
   session: Session;
   /**
-   * Role display names (not permission codes) — a display convenience, not a
-   * substitute for resolving `user.roles` via `GET /roles/{id}`. See the
-   * "Achado do Frontend Lote 1" note in `docs/api/001-authentication.md`.
+   * Role display names (not permission codes) — a display convenience only.
    */
   roles: string[];
+  /**
+   * Effective permission codes for the authenticated User, computed by the
+   * Backend (`AuthorizationService.get_permission_codes`) — the real source
+   * for `usePermissions()`/`useAuthorizedNav()`. Does NOT require
+   * `identity_access.role.view` (correção RBAC pós-Lote 2 — ver
+   * `PermissionsProvider`); `GET /roles/{id}` stays reserved for the
+   * administrative role-management screen.
+   */
+  permissions: string[];
 }
 
 /** Envelope every non-2xx response uses (`ERROR_MODEL.md`). */

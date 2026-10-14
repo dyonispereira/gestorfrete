@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.exceptions.base import InfrastructureError
+from modules.identity_access.application.authorization_service import AuthorizationService
 from modules.identity_access.application.dtos.auth_dto import MeResultDTO, SessionDTO
 from modules.identity_access.application.dtos.user_dto import UserDTO
 from modules.identity_access.infrastructure.persistence.repositories.sqlalchemy_role_repository import (
@@ -31,7 +32,14 @@ class GetMeQuery(Query):
 
 class GetMeHandler(QueryHandler[GetMeQuery, MeResultDTO]):
     """`user.roles` vem expandido (nomes, não IDs) — `001-authentication.md`: "é a própria
-    identidade do ator, o Frontend precisa disso imediatamente após login"."""
+    identidade do ator, o Frontend precisa disso imediatamente após login".
+
+    `permission_codes` também vai embutido aqui (correção RBAC pós-Lote 2): o Frontend precisa
+    das permissões efetivas do próprio usuário autenticado só para montar o menu, e isso nunca
+    deveria depender de `identity_access.role.view` (uma permissão administrativa de gestão de
+    roles, não de autoconsulta). Reutiliza `AuthorizationService.get_permission_codes`, a mesma
+    lógica que `require_permission` já usa para autorizar cada endpoint de negócio — nenhuma
+    lista hardcoded, nenhum fallback permissivo."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -57,6 +65,9 @@ class GetMeHandler(QueryHandler[GetMeQuery, MeResultDTO]):
 
             roles = await role_repo.get_many(user.role_ids)
 
+        authz = AuthorizationService(self._session_factory)
+        permission_codes = sorted(await authz.get_permission_codes(query.actor))
+
         return MeResultDTO(
             user=UserDTO.from_entity(user),
             tenant=TenantDTO.from_entity(tenant),
@@ -67,4 +78,5 @@ class GetMeHandler(QueryHandler[GetMeQuery, MeResultDTO]):
                 status=access_session.status.value,
             ),
             role_names=sorted(r.nome for r in roles),
+            permission_codes=permission_codes,
         )

@@ -11,6 +11,8 @@ interface SessionContextValue {
   user: AuthUser | null;
   tenant: TenantContext | null;
   session: Session | null;
+  /** Effective permission codes for the authenticated User (`GET /auth/me`, `MeResponse.permissions`). */
+  permissions: string[];
   isLoading: boolean;
   error: Error | null;
 }
@@ -37,6 +39,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       user: data?.user ?? null,
       tenant: data?.tenant ?? null,
       session: data?.session ?? null,
+      permissions: data?.permissions ?? [],
       isLoading: isAuthenticated === null || (isAuthenticated && isLoading),
       error: error as Error | null,
     }),

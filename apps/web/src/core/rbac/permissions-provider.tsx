@@ -1,11 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useQueries } from "@tanstack/react-query";
 
 import { useSession } from "@/core/tenant/session-provider";
-import { apiFetch } from "@/shared/lib/api-client";
-import type { Role } from "@gestorfrete/types";
 
 interface PermissionsContextValue {
   /** Effective permission codes across every Role the User holds (`modulo.recurso.acao`). */
@@ -18,34 +15,20 @@ interface PermissionsContextValue {
 const PermissionsContext = React.createContext<PermissionsContextValue | null>(null);
 
 /**
- * Resolves RBAC the same way the Backend does (`identity_access`,
- * `RBAC_MATRIX.md`): a User has Roles, a Role carries permission codes —
- * there is no separate "my permissions" endpoint, so this unions
- * `GET /roles/{id}` across every Role UUID on `User.roles`.
+ * Correção RBAC pós-Lote 2: as permissões efetivas vêm prontas de
+ * `GET /auth/me` (`MeResponse.permissions`, calculado pelo Backend via
+ * `AuthorizationService.get_permission_codes` — a mesma lógica que
+ * `require_permission` usa para autorizar cada endpoint). Antes, este
+ * provider refazia o cálculo no Frontend unindo `GET /roles/{id}` por Role,
+ * o que exigia `identity_access.role.view` — uma permissão administrativa
+ * que um usuário operacional comum não tem, e sem ela NENHUMA permissão era
+ * resolvida (o menu inteiro colapsava para só o Dashboard). `GET /roles/{id}`
+ * continua existindo e protegido, só não é mais consultado para este fim.
  */
 export function PermissionsProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useSession();
-  const roleIds = user?.roles ?? [];
+  const { permissions: permissionCodes, isLoading } = useSession();
 
-  const roleQueries = useQueries({
-    queries: roleIds.map((roleId) => ({
-      queryKey: ["roles", roleId],
-      queryFn: () => apiFetch<Role>(`/roles/${roleId}`),
-      enabled: roleIds.length > 0,
-      staleTime: 5 * 60_000,
-    })),
-  });
-
-  const isLoading = roleIds.length > 0 && roleQueries.some((query) => query.isLoading);
-
-  const permissions = React.useMemo(() => {
-    const codes = new Set<string>();
-    for (const query of roleQueries) {
-      for (const code of query.data?.permissions ?? []) codes.add(code);
-    }
-    return codes;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleQueries.map((q) => q.dataUpdatedAt).join(",")]);
+  const permissions = React.useMemo(() => new Set(permissionCodes), [permissionCodes]);
 
   const hasPermission = React.useCallback((code: string) => permissions.has(code), [permissions]);
   const hasAnyPermission = React.useCallback(

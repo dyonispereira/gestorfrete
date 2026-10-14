@@ -95,6 +95,8 @@ class MeResponse(BaseModel):
     tenant: TenantContextResponse
     session: SessionResponse
     roles: list[str]
+    # Permissões efetivas do próprio usuário autenticado — não requer identity_access.role.view.
+    permissions: list[str]
 
     @staticmethod
     def from_dto(dto: MeResultDTO) -> "MeResponse":
@@ -110,4 +112,5 @@ class MeResponse(BaseModel):
                 status=dto.session.status,
             ),
             roles=dto.role_names,
+            permissions=dto.permission_codes,
         )

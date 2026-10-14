@@ -68,8 +68,9 @@ test.describe("Sprint 12 — Frontend, Lote Identity", () => {
     await page.getByRole("button", { name: "Salvar permissões" }).click();
     await expect(page.getByText("Permissões atualizadas.")).toBeVisible({ timeout: 10_000 });
 
-    // No page.reload() anywhere below — React Query's cache invalidation (same `["roles", roleId]`
-    // key PermissionsProvider reads) must be what makes this work, purely client-side navigation.
+    // No page.reload() anywhere below — React Query's invalidation of `["auth", "me"]` (the query
+    // PermissionsProvider now reads effective permissions from) must be what makes this work,
+    // purely client-side navigation.
     await expect(page.getByRole("link", { name: "Usuários" })).toBeVisible({ timeout: 10_000 });
     await page.getByRole("link", { name: "Usuários" }).click();
     await page.waitForURL("**/usuarios");

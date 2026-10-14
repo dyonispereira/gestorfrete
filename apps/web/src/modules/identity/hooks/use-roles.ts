@@ -12,14 +12,6 @@ export function useRolesQuery(params: rolesService.ListRolesParams) {
   });
 }
 
-/**
- * Query key here is exactly `["roles", roleId]` — the same key
- * `PermissionsProvider` (`core/rbac/permissions-provider.tsx`) uses to
- * resolve the current User's effective permissions. Every mutation below
- * invalidates it deliberately, so editing a Role's permissions takes effect
- * on the next request without a manual reload of stored permissions
- * (Sprint 12 Identity Lote, cenário 4).
- */
 export function useRoleQuery(roleId: string | undefined) {
   return useQuery({
     queryKey: ["roles", roleId],
@@ -28,11 +20,20 @@ export function useRoleQuery(roleId: string | undefined) {
   });
 }
 
+/**
+ * Invalidates both the Role's own cache entries and `["auth", "me"]` —
+ * `PermissionsProvider` now reads its effective-permissions set from
+ * `GET /auth/me` (RBAC structural fix), not from `GET /roles/{id}`, so a
+ * Role edit/delete only reaches an already-logged-in User's menu/guards on
+ * the next request if this session query is invalidated too (Sprint 12
+ * Identity Lote, cenário 4).
+ */
 function useInvalidateRole(roleId: string) {
   const queryClient = useQueryClient();
   return () => {
     queryClient.invalidateQueries({ queryKey: ["roles", "list"] });
     queryClient.invalidateQueries({ queryKey: ["roles", roleId] });
+    queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
   };
 }
 

@@ -32,3 +32,4 @@ class MeResultDTO:
     tenant: TenantDTO
     session: SessionDTO
     role_names: list[str]
+    permission_codes: list[str]

@@ -301,6 +301,138 @@ class TestRbac:
         assert (await client.get("/api/v1/roles", headers=headers)).status_code == 200
 
 
+class TestEffectivePermissionsViaMe:
+    """GET /auth/me.permissions — correção RBAC pós-Lote 2 (GESTORFRETE — CORREÇÃO ESTRUTURAL
+    RBAC). Antes desta correção, o Frontend montava o menu unindo `GET /roles/{id}` por Role, o
+    que exigia `identity_access.role.view` — uma permissão administrativa que um operador comum
+    não tem, colapsando o menu inteiro para só o Dashboard. Agora `/auth/me` já traz as permissões
+    efetivas calculadas pelo Backend (`AuthorizationService.get_permission_codes`, a mesma lógica
+    de `require_permission`), sem exigir nenhuma permissão de gestão de roles."""
+
+    async def test_operator_without_role_view_still_gets_effective_permissions(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+
+        # Papel operacional típico: permissão de negócio, zero permissões de identity_access.
+        role = await _create_role(tenant_id, ["tenancy.company_data.view"])
+        _, email = await _create_user(tenant_id, role_ids=frozenset({role}))
+
+        _, headers = await _login(client, email)
+
+        me = await client.get("/api/v1/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["permissions"] == ["tenancy.company_data.view"]
+
+        # GET /roles/{id} continua protegido — a correção não baixou essa guarda.
+        roles_response = await client.get("/api/v1/roles", headers=headers)
+        assert roles_response.status_code == 403
+        assert roles_response.json()["error"]["code"] == "IDENTITY_PERMISSION_DENIED"
+
+    async def test_user_without_any_business_permission_gets_empty_list(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+
+        role = await _create_role(tenant_id, [])
+        _, email = await _create_user(tenant_id, role_ids=frozenset({role}))
+
+        _, headers = await _login(client, email)
+        me = await client.get("/api/v1/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["permissions"] == []
+
+    async def test_multiple_roles_union_into_me_permissions(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+
+        role_a = await _create_role(tenant_id, ["identity_access.user.view"])
+        role_b = await _create_role(tenant_id, ["tenancy.company_data.view"])
+        _, email = await _create_user(tenant_id, role_ids=frozenset({role_a, role_b}))
+
+        _, headers = await _login(client, email)
+        me = await client.get("/api/v1/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["permissions"] == ["identity_access.user.view", "tenancy.company_data.view"]
+
+    async def test_permissions_resolve_live_not_cached_after_role_changes_post_login(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """D340 — nunca resolvido a partir de um claim do JWT. Trocar as permissões do Papel
+        depois do login (sem logout/novo login) deve refletir na próxima chamada a /auth/me."""
+
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+
+        role = await _create_role(tenant_id, ["tenancy.company_data.view"])
+        _, email = await _create_user(tenant_id, role_ids=frozenset({role}))
+
+        _, headers = await _login(client, email)
+        me_before = await client.get("/api/v1/auth/me", headers=headers)
+        assert me_before.json()["permissions"] == ["tenancy.company_data.view"]
+
+        from modules.identity_access.application.commands.update_role import UpdateRoleCommand, UpdateRoleHandler
+
+        bootstrap_actor = AuthenticatedActor(user_id=uuid.uuid4(), tenant_id=tenant_id, session_id=uuid.uuid4())
+        token = set_current_tenant_id(tenant_id)
+        try:
+            await UpdateRoleHandler().handle(
+                UpdateRoleCommand(
+                    actor=bootstrap_actor,
+                    role_id=role,
+                    nome=None,
+                    descricao=None,
+                    permission_codes=["identity_access.user.view"],
+                )
+            )
+        finally:
+            reset_current_tenant_id(token)
+
+        me_after = await client.get("/api/v1/auth/me", headers=headers)
+        assert me_after.json()["permissions"] == ["identity_access.user.view"]
+
+    async def test_permissions_isolated_per_tenant(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        tenant_a, tenant_b = await _create_tenant(), await _create_tenant()
+        tenants.extend([tenant_a, tenant_b])
+
+        role_a = await _create_role(tenant_a, ["identity_access.user.view"])
+        _, email_a = await _create_user(tenant_a, role_ids=frozenset({role_a}))
+
+        role_b = await _create_role(tenant_b, [])
+        _, email_b = await _create_user(tenant_b, role_ids=frozenset({role_b}))
+
+        _, headers_a = await _login(client, email_a)
+        _, headers_b = await _login(client, email_b)
+
+        assert (await client.get("/api/v1/auth/me", headers=headers_a)).json()["permissions"] == [
+            "identity_access.user.view"
+        ]
+        assert (await client.get("/api/v1/auth/me", headers=headers_b)).json()["permissions"] == []
+
+    async def test_direct_url_access_to_protected_endpoint_still_requires_real_permission(
+        self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
+    ) -> None:
+        """O menu é só representação visual — acesso direto por URL a um recurso protegido
+        continua sendo barrado no Backend independentemente do que o Frontend decidiu mostrar."""
+
+        tenant_id = await _create_tenant()
+        tenants.append(tenant_id)
+
+        role = await _create_role(tenant_id, ["tenancy.company_data.view"])
+        _, email = await _create_user(tenant_id, role_ids=frozenset({role}))
+
+        _, headers = await _login(client, email)
+        response = await client.get("/api/v1/users", headers=headers)
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "IDENTITY_PERMISSION_DENIED"
+
+
 class TestSoftDelete:
     async def test_deactivated_user_is_excluded_from_normal_queries_but_row_still_exists(
         self, client: AsyncClient, permission_ids: dict[str, uuid.UUID], tenants: list[uuid.UUID]
